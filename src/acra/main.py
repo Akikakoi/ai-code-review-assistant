@@ -27,6 +27,7 @@ from acra.logging_setup import configure_logging
 from acra.observability import metrics as metrics_mod
 from acra.orchestrator.pipeline import ReviewOptions, run_review
 from acra.orchestrator.scheduler import InMemoryQueue, enqueue, run_worker
+from acra.publish.factory import open_publisher, resolve_access
 from acra.settings import Settings, get_settings
 from acra.store.db import Database
 from acra.trigger import github_webhook, gitlab_webhook
@@ -74,13 +75,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.acra_inline_worker:
 
             async def handler(job):
-                outcome = await run_review(
-                    job,
-                    settings,
-                    options=ReviewOptions(),
-                    db=app.state.db,
-                    cache=app.state.cache,
-                )
+                # 凭据在这里解析：webhook 事件自带 `installation.id`，比配置里的更可信
+                access = await resolve_access(settings, job)
+                if not access.available:
+                    # 不发布本身是合法状态（本地/未配置凭据），但"本该能发却没发"必须能看见
+                    logger.warning(
+                        "本次任务只分析不发布（凭据来源=%s%s）",
+                        access.source,
+                        f"，原因：{access.error}" if access.error else "",
+                    )
+                async with open_publisher(access) as publisher:
+                    outcome = await run_review(
+                        job,
+                        settings,
+                        options=ReviewOptions(),
+                        db=app.state.db,
+                        cache=app.state.cache,
+                        publisher=publisher,
+                        clone_token=access.token,
+                    )
                 metrics_mod.observe_outcome(outcome)
                 return outcome
 

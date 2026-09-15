@@ -8,7 +8,7 @@ acra review [OPTIONS]
 --repo PATH             仓库路径，默认当前目录
 --base REF              基线引用（分支/tag/SHA）
 --head REF              目标引用，默认 HEAD
---pr NUMBER             平台 PR 号（二选一，与 --base/--head 互斥）
+--pr NUMBER             平台 PR 号；`--publish` 时作为发布目标，与 --base/--head 并用
 --format text|json|sarif
 --out FILE              输出文件，缺省打到 stdout
 --level 1|2|3           强制上下文层级（调试用）
@@ -16,6 +16,8 @@ acra review [OPTIONS]
 --dry-run               只分析不发布
 --no-llm                纯静态分析模式（用于基线对比）
 --fail-on high|medium   达到该严重度时返回退出码 1（供 CI 使用）
+--publish               真实发布 review 到平台（需凭据 + --pr + --repo-full-name）
+--repo-full-name o/r    发布目标仓库（owner/name）
 ```
 
 退出码：`0` 正常，`1` 命中 `--fail-on` 门槛，`2` 参数错误，`3` 分析失败。
@@ -35,7 +37,8 @@ from acra.cache.content_hash import MemoryCache
 from acra.errors import GitError
 from acra.logging_setup import configure_logging
 from acra.observability import metrics as metrics_mod
-from acra.orchestrator.pipeline import ReviewOptions, run_review
+from acra.orchestrator.pipeline import ReviewOptions, ReviewOutcome, run_review
+from acra.publish.factory import GithubAccess, open_publisher, resolve_access
 from acra.publish.renderer import (
     render_json,
     render_sarif_json,
@@ -88,7 +91,9 @@ def review(
     repo: str = typer.Option(".", "--repo", help="仓库路径，默认当前目录"),
     base: str = typer.Option(None, "--base", help="基线引用（分支/tag/SHA）"),
     head: str = typer.Option(None, "--head", help="目标引用，默认 HEAD"),
-    pr: int = typer.Option(None, "--pr", help="平台 PR 号（与 --base/--head 互斥）"),
+    pr: int = typer.Option(
+        None, "--pr", help="平台 PR 号；指定发布目标时配合 --publish 使用"
+    ),
     fmt: str = typer.Option("text", "--format", help="输出格式：text | json | sarif"),
     out: str = typer.Option(None, "--out", help="输出文件，缺省打到 stdout"),
     level: int = typer.Option(None, "--level", help="强制上下文层级 1|2|3（调试用）"),
@@ -98,18 +103,36 @@ def review(
     fail_on: str = typer.Option(None, "--fail-on", help="达到该严重度时返回退出码 1：high|medium"),
     shadow: bool = typer.Option(None, "--shadow/--no-shadow", help="影子模式：只落库不发布"),
     full: bool = typer.Option(False, "--full", help="强制全量重审，不做增量"),
+    publish: bool = typer.Option(
+        False, "--publish", help="真实发布 review 到平台（需要凭据 + --pr + --repo-full-name）"
+    ),
+    repo_full_name: str = typer.Option(
+        None, "--repo-full-name", help="owner/name；发布时必填，缺省用仓库目录名"
+    ),
     no_store: bool = typer.Option(False, "--no-store", help="不写运行记录（不碰数据库）"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="输出调试日志"),
 ) -> None:
     """审查一次变更。"""
     if fmt not in FORMATS:
         raise typer.BadParameter(f"--format 只能是 {'|'.join(FORMATS)}")
-    if pr is not None and (base or head):
-        raise typer.BadParameter("--pr 与 --base/--head 互斥，只能二选一")
+    if pr is not None and (base or head) and not publish:
+        # 平台模式下 `--pr` 是"审查范围由平台解析"的入口，与显式 ref 语义重叠；
+        # 但发布时 `--pr` 只是**发布目标**，diff 仍要由 --base/--head 指定 —— 二者不冲突。
+        raise typer.BadParameter(
+            "--pr 与 --base/--head 互斥；若要发布到该 PR，请配合 --publish 使用"
+        )
     if level is not None and level not in (1, 2, 3):
         raise typer.BadParameter("--level 只能是 1|2|3")
     if fail_on is not None and fail_on not in ("high", "medium"):
         raise typer.BadParameter("--fail-on 只能是 high|medium")
+    if publish:
+        # 发布需要知道"发到哪"：仓库全名与 PR 号缺一不可，否则只能在本地产出文本
+        if pr is None:
+            raise typer.BadParameter("--publish 需要 --pr 指定发布到哪个 PR")
+        if not repo_full_name:
+            raise typer.BadParameter("--publish 需要 --repo-full-name owner/name")
+        if dry_run:
+            raise typer.BadParameter("--publish 与 --dry-run 互斥")
 
     settings = get_settings()
     configure_logging("DEBUG" if verbose else settings.log_level)
@@ -141,10 +164,30 @@ def review(
             typer.secho(f"提示：运行记录不可用（{type(exc).__name__}），继续分析", err=True)
             db = None
 
+    async def _run_review() -> ReviewOutcome:
+        """凭据解析与 publisher 的生命周期都收在这里，`run_review` 本身不认识 token。"""
+        access = GithubAccess()
+        if publish:
+            access = await resolve_access(settings, job)
+            if not access.available:
+                typer.secho(
+                    f"无法获取 GitHub 凭据（来源={access.source}）：{access.error or '未配置'}",
+                    err=True,
+                )
+                raise typer.Exit(EXIT_FAILED)
+        async with open_publisher(access) as publisher:
+            return await run_review(
+                job,
+                settings,
+                options=options,
+                db=db,
+                cache=MemoryCache(),
+                publisher=publisher,
+                clone_token=access.token,
+            )
+
     try:
-        outcome = asyncio.run(
-            run_review(job, settings, options=options, db=db, cache=MemoryCache())
-        )
+        outcome = asyncio.run(_run_review())
     except GitError as exc:
         typer.secho(f"git 失败：{exc}", err=True)
         raise typer.Exit(EXIT_FAILED) from exc
@@ -177,6 +220,11 @@ def review(
     if outcome.mode == "paused":
         typer.secho("本次未分析：日预算已耗尽。", err=True)
         raise typer.Exit(EXIT_OK)
+
+    # 发布结果必须打出来：`--publish` 的调用方要能一眼看到"到底发出去了没有"，
+    # 而不是从"没有报错"倒推（幂等跳过与真的发出去，两者都没有报错）。
+    if outcome.publish_result is not None:
+        typer.echo(f"发布结果：{json.dumps(outcome.publish_result, ensure_ascii=False)}")
 
     if fail_on and severity_exit_hit(outcome.reported, fail_on):
         raise typer.Exit(EXIT_GATE_HIT)
@@ -239,9 +287,22 @@ def worker(
     queue = _build_queue(settings)
 
     async def handler(job) -> None:
-        outcome = await run_review(
-            job, settings, options=ReviewOptions(), db=db, cache=cache
-        )
+        access = await resolve_access(settings, job)
+        if not access.available:
+            typer.secho(
+                f"[{job.job_id[:8]}] 无 GitHub 凭据（来源={access.source}），本次只分析不发布",
+                err=True,
+            )
+        async with open_publisher(access) as publisher:
+            outcome = await run_review(
+                job,
+                settings,
+                options=ReviewOptions(),
+                db=db,
+                cache=cache,
+                publisher=publisher,
+                clone_token=access.token,
+            )
         metrics_mod.observe_outcome(outcome)
         typer.echo(f"[{job.job_id[:8]}] {outcome.mode} → {len(outcome.reported)} 条结论")
 

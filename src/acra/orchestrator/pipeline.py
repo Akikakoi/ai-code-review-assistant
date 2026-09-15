@@ -189,6 +189,7 @@ async def run_review(
     custom_conventions: str = "",
     repo_config=None,
     static_runner=None,
+    clone_token: str | None = None,
 ) -> ReviewOutcome:
     """一次审查的编排入口。
 
@@ -196,6 +197,9 @@ async def run_review(
     它决定 max_comments / 置信度门槛 / 忽略路径与规则 / 启用的 linter（文档 §12.5）。
 
     `static_runner` 用于注入静态分析的工具执行后端（测试用；生产走真实子进程）。
+
+    `publisher` 为 None 时**不发布**（本地 `--dry-run` 即此语义）。`clone_token` 单独传入
+    而不是从 publisher 里反查：私有仓库的克隆发生在发布之前，两者生命周期并不重合。
     """
     started = time.monotonic()
     opts = options or ReviewOptions(job.force_full)
@@ -204,7 +208,7 @@ async def run_review(
 
     # ---- 1. 仓库接入 ----
     try:
-        handle = await asyncio.to_thread(_open_repo, job, settings)
+        handle = await asyncio.to_thread(_open_repo, job, settings, token=clone_token)
     except (GitError, CloneError) as exc:
         on_clone_failure(outcome.degrade)
         outcome.error = f"{type(exc).__name__}: {exc}"
@@ -479,11 +483,13 @@ async def run_review(
 # ---------------------------------------------------------------------------- 步骤实现
 
 
-def _open_repo(job: ReviewJob, settings):
+def _open_repo(job: ReviewJob, settings, *, token: str | None = None):
     if job.remote_url:
+        # 私有仓库必须带 installation token；公开仓库带了也无害（文档 §4.4）
         return gateway.ensure_bare_clone(
             job.remote_url,
             settings.ensure_workdir(),
+            token=token,
             depth=1,
         )
     return gateway.discover_local(job.repo_path)

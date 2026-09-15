@@ -25,7 +25,14 @@ class Settings(BaseSettings):
     # ---------------- 平台接入 ----------------
     github_app_id: str = ""
     github_app_private_key_path: str = ""
+    #: GitHub API 根地址。除 GitHub.com 外还用于 GHES；也让发布链路可被指向测试端点。
+    github_api_base: str = "https://api.github.com"
+    #: App 安装 ID。webhook 事件里自带（`installation.id`）；CLI 本地发布时只能从这里取。
+    github_app_installation_id: str = ""
     github_webhook_secret: str = ""
+    #: 静态 token。**只用于本地 / CI 做一次性端到端验证**，生产走 App installation token。
+    #: 存在的意义是让"发布链路能不能通"这件事可以在没有 App 的环境里被验证。
+    acra_github_token: str = ""
     # 手动触发 / 管理接口的共享令牌（阶段一仅 CLI，留空则管理接口关闭）
     acra_admin_token: str = ""
 

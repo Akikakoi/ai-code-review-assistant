@@ -122,6 +122,35 @@ acra serve --host 0.0.0.0 --port 8000
 | GET | `/api/v1/metrics/summary` | 质量与成本聚合 |
 | GET | `/healthz` · `/readyz` · `/metrics` | 探针与指标 |
 
+### 6. 发布 review 到 PR
+
+发布需要凭据，两条路：
+
+| 方式 | 配置 | 用途 |
+| --- | --- | --- |
+| GitHub App | `GITHUB_APP_ID` · `GITHUB_APP_PRIVATE_KEY_PATH` · `GITHUB_APP_INSTALLATION_ID` | 生产 |
+| 静态 token | `ACRA_GITHUB_TOKEN` | 本地 / CI 一次性验证（没有 App 时的逃生口） |
+
+App 的最小权限：**Pull requests: write**（提交 review）、**Checks: write**（写 Check Run）、
+**Contents: read**（克隆私有仓库）、**Metadata: read**（平台强制）。
+
+```bash
+# 对真实 PR 发一次：本地仓库用 --repo，发布目标由 --repo-full-name / --pr 决定
+acra review --repo . --repo-full-name owner/name --pr 12 \
+  --base main --head feature/x --publish
+
+# 默认只分析不发布
+acra review --repo . --base main --head HEAD --dry-run
+```
+
+`--publish` 会真实提交一条 review（`event` 固定 `COMMENT`，绝不 `REQUEST_CHANGES`）并写 Check Run，
+随后把发布结果打到 stdout。**这一步必须看结果，不能靠"没报错"判断**：
+幂等跳过（同一 head_sha 已审过）与真的发出去了，两者都不会报错。
+
+webhook worker 与 `acra worker` 会自动走同一条发布路径；
+未配置凭据时它们只分析不发布，并在日志里写明原因 ——
+「本来就不用发」与「本该能发却没发成」必须能区分开。
+
 ---
 
 ## 架构与代码地图
@@ -134,7 +163,8 @@ acra serve --host 0.0.0.0 --port 8000
 静态分析 analysis/          risk_rules（高风险/低价值判定）· sarif（解析与 diff-aware 过滤）
 引擎    engine/             llm_client · scan（Phase 1）· verify（Phase 2）· merge · prompts/ · schemas/
 校验    postprocess/        validator（§9.1 八步流水线）· dedupe · ranker（§9.2/§9.3）
-输出    publish/            github（review + Check Run）· renderer（评论/summary/text/json/sarif）
+输出    publish/            github（review + Check Run）· factory（凭据解析）· renderer（评论/summary/text/json/sarif）
+平台    github_app.py       GitHub App 认证：JWT → installation token，到期前刷新
 存储    store/              SQLAlchemy 模型（逐表对应 §5.2）· repository（数据访问）
 缓存    cache/              内容哈希缓存（内存 / Redis）· semantic（阶段四）
 ```
@@ -476,15 +506,27 @@ MiMo 的思考 token 计入 `max_completion_tokens`。预算给小了会出现
 [PASS] 未设门槛：有高危结论也返回 0（门禁是使用方主动选的，不是隐式阻断） —— rc=0
 [PASS] --fail-on high：命中高危结论返回 1 —— rc=1
 [PASS] 参数非法返回 2 —— rc=2
+[PASS] --publish 缺少 --pr 返回 2（发布目标必须明确） —— rc=2
+[PASS] --pr 与 --base/--head 互斥仍然成立（非发布场景） —— rc=2
+[PASS] --publish 拿不到凭据时返回 3 并说明原因（不是静默不发布） —— rc=3
 [PASS] 分析失败（仓库不存在）返回 3 —— rc=3
 ```
 
 它断言的不止退出码：场景 1 还要求输出里真的含一条 `[高]`。
 否则一次空跑（什么都没报）也会让退出码恰好等于期望值，那种"通过"没有任何意义。
 
+这个脚本抓到过两处真问题，值得留档：
+
+1. 首次运行时四个场景全返回 2 —— 脚本自己漏了 `review` 子命令，
+   于是每个场景都变成"用法错误"。**单测不会发现这种事，因为它测的是函数而不是命令。**
+2. `--publish` 写出来后，发现 `--pr` 与 `--base/--head` 被硬性互斥，
+   于是**根本没法既指定发布目标、又指定要审的 diff**。已改为：
+   非发布场景维持互斥，`--publish` 时 `--pr` 只作发布目标。
+
 脚本自己构造临时演示仓库（复用 `examples/build_static_demo.py`），
 **不依赖 `examples/` 下的生成物是否被提交** —— 那两个演示仓库含自己的 `.git`，
 提交进本仓库会被记成 gitlink（伪 submodule），已加入 `.gitignore`。
+凭据失败场景用环境变量构造，因此不依赖本机有没有配 GitHub 凭据，也不会真的发布。
 
 ---
 
