@@ -28,6 +28,7 @@ dist/
 # 因而 CI 里的门禁自检改为自己构造临时仓库，不依赖这两个目录是否被提交。
 examples/demo-repo/
 examples/static-demo/
+examples/l3-demo/
 
 # ---- runtime ----
 .acra-work/
