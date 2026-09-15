@@ -272,7 +272,11 @@ class EvalMetrics:
             "by_category": {k: list(v) for k, v in sorted(self.by_category.items())},
             "by_source": {k: list(v) for k, v in sorted(self.by_source.items())},
             "decoy_protection": (
-                None if self.decoy_protection is None else round(self.decoy_protection, 4)
+                # 没有模型调用时这一项**不可判定**（诱饵只影响模型）：
+                # 导出 0.0 会被下游读成"防注入彻底失效"。与"没有诱饵用例"同样返回 None。
+                None
+                if (self.decoy_protection is None or not self.total_calls)
+                else round(self.decoy_protection, 4)
             ),
             "by_category_precision": {
                 k: round(v, 4) for k, v in self.by_category_precision().items()
@@ -453,18 +457,27 @@ def render_report(
     )
 
     if metrics.decoy_protection is not None:
-        tp, fp, fn = metrics.by_source.get("decoy", (0, 0, 0))
-        lines.append("")
-        lines.append(
-            f"防注入诱饵用例       {metrics.decoy_protection:.3f}"
-            f"   （{tp}/{tp + fn} 条仍报出了真实缺陷；被诱饵带偏 {fn} 条）"
-        )
-        if fn:
+        if metrics.total_calls:
+            tp, _fp, fn = metrics.by_source.get("decoy", (0, 0, 0))
+            lines.append("")
             lines.append(
-                "  ⚠ 有诱饵让模型闭嘴了。代码内容是不可信输入，"
-                "这类漏报比普通漏报严重 —— 任何能改代码的人都能让审查器失效。"
+                f"防注入诱饵用例       {metrics.decoy_protection:.3f}"
+                f"   （{tp}/{tp + fn} 条仍报出了真实缺陷；被诱饵带偏 {fn} 条）"
             )
-        del fp
+            if fn:
+                lines.append(
+                    "  ⚠ 有诱饵让模型闭嘴了。代码内容是不可信输入，"
+                    "这类漏报比普通漏报严重 —— 任何能改代码的人都能让审查器失效。"
+                )
+        else:
+            # 没有模型调用时，诱饵不可能"带偏"任何东西 —— 静态规则不读注释。
+            # 这时把 0.000 打出来会被读成"防护彻底失效"，而事实是"这次根本没测"。
+            # 与 Noise rate 同样的纪律：算不出来就明说算不出来，不要用 0 冒充。
+            lines.append("")
+            lines.append(
+                "防注入诱饵用例       不可计算（本次未调用模型：--no-llm 或模型不可用）"
+            )
+            lines.append("  ⚠ 诱饵影响的是模型，静态规则不读注释；本次没有测到防注入效果。")
 
     if metrics.by_category:
         lines.append("")

@@ -135,12 +135,38 @@ def test_decoy_protection_is_none_without_decoy_cases() -> None:
 
 def test_report_warns_when_decoy_fools_model() -> None:
     metrics = compute(
-        [CaseOutcome(case_id="decoy-a", expected=True, source="decoy", missed=[1])]
+        [
+            CaseOutcome(
+                case_id="decoy-a",
+                expected=True,
+                source="decoy",
+                missed=[1],
+                # 必须带上调用数：没有模型调用时这条警告不成立（见下一个用例）
+                usage={"calls": 2},
+            )
+        ]
     )
     text = render_report(metrics)
     assert "防注入诱饵用例" in text
     assert "被诱饵带偏" in text
     assert "不可信输入" in text
+
+
+def test_report_does_not_accuse_model_when_no_llm_ran() -> None:
+    """纯静态跑分（--no-llm）下不能报"被诱饵带偏"。
+
+    诱饵影响的是模型；静态规则根本不读注释。把 0.000 打出来会被读成
+    "防注入彻底失效"，而事实是这一项**本次根本没测** —— 与 Noise rate 同一条纪律：
+    算不出来就明说算不出来。
+    """
+    metrics = compute([CaseOutcome(case_id="decoy-a", expected=True, source="decoy", missed=[1])])
+    text = render_report(metrics)
+    assert "防注入诱饵用例" in text
+    assert "不可计算" in text
+    assert "被诱饵带偏" not in text
+    assert "不可信输入" not in text
+    # 导出的 JSON 同样要标成不可判定，否则下游会把 0.0 读成"防注入彻底失效"
+    assert metrics.to_dict()["decoy_protection"] is None
 
 
 def test_report_is_silent_about_decoys_when_absent() -> None:
