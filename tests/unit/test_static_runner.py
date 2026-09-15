@@ -524,3 +524,75 @@ def test_tools_registry_commands_are_executables() -> None:
         assert spec.command, f"{name} 没有可执行命令"
         assert callable(spec.argv)
         assert callable(spec.parse)
+
+
+# ---------------------------------------------------------------------------- 规则分类
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "expected"),
+    [
+        # Semgrep 带命名空间：命中的那一段就是权威分类，不该再去规则名里猜
+        ("java.lang.security.audit.formatted-sql-string.formatted-sql-string", "security"),
+        ("python.lang.security.audit.dangerous-subprocess-use", "security"),
+        ("java.lang.correctness.useless-eqeq.useless-eqeq", "bug"),
+        ("python.lang.best-practice.use-of-assert", "maintainability"),
+        ("java.lang.performance.string-formatted-in-loop", "performance"),
+    ],
+)
+def test_classify_rule_reads_semgrep_namespace(rule_id: str, expected: str) -> None:
+    from acra.analysis.static_runner import classify_rule
+
+    assert classify_rule("semgrep", rule_id) == expected
+
+
+@pytest.mark.parametrize(
+    ("tool", "rule_id", "expected"),
+    [
+        ("ruff", "F401", "maintainability"),
+        # `e5` 这个前缀对应 pycodestyle 的"行长度"风格组，E501 正落在其中。
+        # 注意 E711（与 None 比较）属于 E7"编程错误"组、不在这几个前缀里，
+        # 因此会落到 maintainability —— 这是已知的粗糙处，不是这里在断言的正确行为。
+        ("ruff", "E501", "style"),
+        ("eslint", "no-undef", "bug"),
+        ("tsc", "TS2322", "bug"),
+    ],
+)
+def test_classify_rule_falls_back_to_keywords(tool: str, rule_id: str, expected: str) -> None:
+    """没有命名空间的 ID（ruff / eslint / tsc）仍走关键词回退。"""
+    from acra.analysis.static_runner import classify_rule
+
+    assert classify_rule(tool, rule_id) == expected
+
+
+def test_formatted_sql_string_is_not_mistaken_for_a_style_rule() -> None:
+    """回归：`formatted-sql-string` 里的 `formatted` 曾被 `format` 关键词抢先命中。
+
+    后果不是"分类不好看"，而是**评测口径**上的双重扣分：
+    类别跨族 ⇒ 这条结论既不算命中（FN）、又被记成一次误报（FP），
+    而它是 `full_suite()` 里唯一为静态层服务的样本 —— 于是"静态层可用"永远证明不了。
+    """
+    from acra.analysis.static_runner import classify_rule
+
+    assert classify_rule("semgrep", "java.lang.security.audit.formatted-sql-string") == "security"
+
+
+def test_static_probe_ground_truth_matches_classifier() -> None:
+    """静态探针的 ground truth 类别必须与分类器给出的类别一致。
+
+    两者分居两个文件，任何一边单独改动都可能让它们在评测里悄悄对不上，
+    而症状（"跨族 ⇒ 既不算命中又算误报"）看起来像静态层坏了，不像测试写错了。
+    这条测试把两边钉在一起。规则 ID 是实测值：`p/security-audit` 下真实报出的那个。
+    """
+    from acra.analysis.static_runner import classify_rule
+    from acra.eval.static_cases import static_cases
+
+    case = static_cases()[0]
+    declared = case.expectations[0]
+    observed_rule_id = "java.lang.security.audit.formatted-sql-string.formatted-sql-string"
+
+    assert declared.category, "探针没有声明期望类别，评测会退化成只看行号"
+    assert classify_rule("semgrep", observed_rule_id) == declared.category
+    # 声明的 note 必须与实测的规则名对得上，否则"实测验证过"这句话会失效
+    assert "formatted-sql-string" in observed_rule_id
+    assert case.expected_lines(), "marker 没能定位到 head 里的行"

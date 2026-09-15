@@ -563,6 +563,11 @@ def _dedupe(findings: list[StaticFinding]) -> list[StaticFinding]:
 #: 规则 ID / 工具名中的关键词 → acra 的类别。
 #: 关键词匹配不完美，但比"全部标成 bug"诚实：linter 的绝大多数输出属于可维护性，
 #: 只有安全类才需要被单独摘出来。
+#:
+#: 注意：这组关键词是**回退路径**，只在规则 ID 不带命名空间时使用。
+#: 实测踩过：`java.lang.security.audit.formatted-sql-string.formatted-sql-string`
+#: 里 `formatted` 含 `format`，被 `_STYLE_HINTS` 抢先命中 ——
+#: **一条 SQL 注入被归成了风格问题**。所以先读命名空间（见 `classify_rule`）。
 _SECURITY_HINTS = (
     "sqli",
     "sql-injection",
@@ -601,7 +606,9 @@ _BUG_HINTS = (
 )
 _STYLE_HINTS = (
     "style",
-    "format",
+    # 刻意不写裸 `format`：它会命中 `formatted-sql-string` 这类安全规则名。
+    # 风格规则的真实名字长这样：`line-too-long`、`trailing-whitespace`、`indent`。
+    "formatting",
     "naming",
     "line-length",
     "line_too_long",
@@ -618,13 +625,42 @@ _STYLE_HINTS = (
     "w3",
 )
 
+#: Semgrep 的规则 ID 是**带命名空间**的：`<lang>.lang.<category>.<...>`，
+#: 其中 `<category>` 就是 Semgrep 自己给出的权威分类。
+#: 有权威分类可用时不该再去规则名里猜关键词 —— 猜错会把整条结论的类别弄反。
+_SEMGREP_NAMESPACE_CATEGORIES: dict[str, str] = {
+    "security": "security",
+    "correctness": "bug",
+    "best-practice": "maintainability",
+    "maintainability": "maintainability",
+    "performance": "performance",
+    "portability": "maintainability",
+    "compatibility": "maintainability",
+}
+
 #: 静态结论的置信度：工具"报了什么"很少错，不确定的是"这件事有多重要"。
 #: 因此 error 级给 0.8、warning 级给 0.65、note 级给 0.5（note 会被默认门槛过滤掉）。
 _CONFIDENCE_BY_SEVERITY = {"blocker": 0.85, "high": 0.80, "medium": 0.65, "low": 0.50, "nit": 0.40}
 
 
 def classify_rule(tool: str, rule_id: str) -> str:
-    """把规则 ID 归到 acra 的某个类别。"""
+    """把规则 ID 归到 acra 的某个类别。
+
+    两级判定，**顺序不能反**：
+
+    1. **命名空间段**（Semgrep）：`java.lang.security.audit.formatted-sql-string`
+       里的 `security` 就是权威答案；
+    2. **关键词回退**（ruff / eslint / tsc 这类 ID 不带类别命名空间，如 `F401`、`no-undef`）。
+
+    反过来的代价是实测过的：`formatted-sql-string` 先被 `format` 这个风格关键词命中，
+    于是一条 SQL 注入被标成 `style` —— 而评测口径按"类别同族"判命中，
+    结果是**这条结论既不算命中、又被记成一次误报**，静态层看起来完全不可用。
+    """
+    for segment in rule_id.lower().split("."):
+        mapped = _SEMGREP_NAMESPACE_CATEGORIES.get(segment)
+        if mapped:
+            return mapped
+
     haystack = f"{tool}.{rule_id}".lower()
     if any(hint in haystack for hint in _SECURITY_HINTS):
         return "security"
