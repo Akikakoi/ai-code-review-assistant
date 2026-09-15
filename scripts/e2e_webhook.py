@@ -11,13 +11,13 @@
     2. 篡改签名的投递被 401 拒绝，且不产生任何 review
     3. 同一 delivery id 重投 → 幂等跳过，不重复发评论
 
-一处**刻意且会打印出来的偏差**：payload 的 `clone_url` 用本地路径而非
-`https://github.com/...`。本机 git 的 HTTPS 出不去（系统代理指向一个已失效的端口），
-而这处偏差只影响"怎么把代码拿到手"，不影响被验证的链路本身。
-其余字段全部来自真实 PR 对象（`GET /repos/{o}/{r}/pulls/{n}`），不是手写出来的。
+`payload.repository` 来自真实 API（`GET /repos/{o}/{r}`）。`clone_url` 刻意取其中的
+**`ssh_url`** 而不是默认的 `https://github.com/...`：两个 URL 在真实 payload 里本来就
+并存，本机 git 的 HTTPS 出不去（系统代理指向失效端口）而 SSH 是通的。
+若 SSH 也不可用，用 `--clone-url <本地路径>` 退回本地传输。
 
 用法：
-    python scripts/e2e_webhook.py --branch <已推送的测试分支> [--base main]
+    python scripts/e2e_webhook.py --branch <已推送的测试分支> [--base main] [--clone-url URL]
 """
 
 from __future__ import annotations
@@ -84,6 +84,12 @@ class Api:
                      "Accept": "application/vnd.github+json",
                      "X-GitHub-Api-Version": "2022-11-28"},
         )
+
+    def repo(self, owner: str, repo: str) -> dict:
+        resp = self.client.get(f"/repos/{owner}/{repo}")
+        if resp.status_code >= 400:
+            raise SystemExit(f"读取仓库失败（HTTP {resp.status_code}）：{resp.text[:200]}")
+        return resp.json()
 
     def open_pr(self, owner: str, repo: str, *, branch: str, base: str, title: str) -> dict:
         resp = self.client.post(f"/repos/{owner}/{repo}/pulls",
@@ -155,6 +161,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--branch", required=True, help="已推送到远端的测试分支")
     parser.add_argument("--base", default="main")
+    parser.add_argument("--clone-url", default=None,
+                        help="覆盖 payload 的 clone_url；默认取真实 payload 里的 ssh_url")
     parser.add_argument("--keep", action="store_true")
     args = parser.parse_args()
 
@@ -197,17 +205,18 @@ def main() -> int:
         head_sha = pr["head"]["sha"]
         print(f"   PR #{pr_number}  head={head_sha[:8]}")
 
-        # payload 用真实 PR 对象，只改 clone_url（见模块 docstring 的偏差说明）
-        repo_obj = pr.get("base", {}).get("repo") or {}
+        # repository 对象来自真实 API；clone_url 刻意取 ssh_url（见模块 docstring）
+        repo_obj = api.repo(owner, repo)
+        clone_url = args.clone_url or repo_obj.get("ssh_url") or repo_obj.get("clone_url")
         payload = {
             "action": pr.get("state") == "closed" and "closed" or "opened",
             "number": pr["number"],
             "pull_request": pr,
-            "repository": {**repo_obj, "clone_url": str(ROOT), "full_name": f"{owner}/{repo}"},
+            "repository": {**repo_obj, "clone_url": clone_url},
             "sender": {"login": access.source},
         }
         body = json.dumps(payload).encode("utf-8")
-        print("   偏差说明：payload.clone_url 已改为本地路径（本机 git HTTPS 不可用），其余字段来自真实 PR 对象")
+        print(f"   payload.clone_url = {clone_url}（真实 repository 对象的 ssh_url）")
 
         print("3. 投递一次正确签名的 pull_request 事件")
         delivery = str(uuid.uuid4())

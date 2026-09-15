@@ -56,8 +56,11 @@ PR 上必然失败**，整次审查记成 `failed`。这条路径正是 webhook 
 ## 后果与已知限制
 
 - 真实链路验证通过后，webhook 路径在**浅克隆可达**的仓库上可用。
-  本地验证用的是本地路径当 `clone_url`（本机 git HTTPS 出不去，见 `scripts/e2e_webhook.py`
-  顶部的偏差说明）—— 但被验证的是同一条代码路径，差异只在传输层。
+  本地验证时 `payload.repository` 来自真实 API，`clone_url` 取其中的 **`ssh_url`**
+  （`git@github.com:...`）—— 这个字段在真实 webhook payload 里本来就与 `clone_url`
+  并存，本机 git 的 HTTPS 出不去而 SSH 是通的。也就是说 worker 真实地从 GitHub
+  经 SSH 拉取了代码、走了 depth=1 fetch 与本 ADR 的加深逻辑，
+  唯一的自主选择是"用哪一个 URL"，而那个字段是真实的。
 - `--depth` 的上限意味着极老分支仍可能失败，此时报错信息会说明是"加深后仍无法计算
   merge-base"，而不是模糊的 GitError。
 - 顺带记录：本机环境里 `git` 的 HTTPS 出不去（系统级 `http.proxy` 指向失效端口），
