@@ -124,15 +124,35 @@ acra serve --host 0.0.0.0 --port 8000
 
 ### 6. 发布 review 到 PR
 
-发布需要凭据，两条路：
+发布走 REST API，需要一个 Bearer token。四条可用路径，差别比"配哪个变量"大：
 
-| 方式 | 配置 | 用途 |
-| --- | --- | --- |
-| GitHub App | `GITHUB_APP_ID` · `GITHUB_APP_PRIVATE_KEY_PATH` · `GITHUB_APP_INSTALLATION_ID` | 生产 |
-| 静态 token | `ACRA_GITHUB_TOKEN` | 本地 / CI 一次性验证（没有 App 时的逃生口） |
+| 方式 | 身份 | 生命周期 | 能建 Check Run | 适合 |
+| --- | --- | --- | --- | --- |
+| 细粒度 PAT | 你本人 | 手动设，最长 1 年 | ✅（需 `Checks: write`） | 本地 E2E、快速验证 |
+| Classic PAT（`repo`） | 你本人 | 可设永久 | ❌ **只能读，不能建** | 只发评论的场景 |
+| GitHub App | `<app>[bot]` | installation token 1 小时，自动续 | ✅ | 生产 |
+| Actions 的 `GITHUB_TOKEN` | `github-actions[bot]` | 单次 job | ✅（需 `checks: write`） | 在 CI 里自审 |
+
+配置项：App 用 `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY_PATH` / `GITHUB_APP_INSTALLATION_ID`；
+PAT 与 Actions token 都用 `ACRA_GITHUB_TOKEN`（`acra doctor` 会显示来源为 `static_token`）。
+
+**Check Run 是个例外项，值得单独记住**：GitHub 的文档写着 checks 的写权限
+"only available to GitHub Apps"，而同一页的 fine-grained token 小节又列出了
+细粒度 PAT 需要 `Checks: write` —— 两处措辞不一致。因此：
+
+- **Classic PAT / OAuth 用户 token 明确不能创建 Check Run**（这是文档里没有歧义的那部分）；
+- 细粒度 PAT 与 Actions token 按文档是支持的，但**属于该实测一次的事**；
+- 代码对此已经容错：`_publish` 把 Check Run 调用单独包在 `try/except` 里，
+  失败只记 `check_run_error`，**不会连带丢掉 review 评论**。
+
+仓库级 Webhook 与 App Webhook 都能投递事件、都用 `X-Hub-Signature-256` 验签，
+所以第 5 项（Webhook）**不必先有 App**：`Settings → Webhooks` 配一个仓库级 webhook 即可。
+唯一的差别是 App 的 payload 里带 `installation.id`（仓库级没有），
+而 `resolve_access` 对此已回退到 `GITHUB_APP_INSTALLATION_ID`；用 PAT 时这条路径完全不涉及。
 
 App 的最小权限：**Pull requests: write**（提交 review）、**Checks: write**（写 Check Run）、
 **Contents: read**（克隆私有仓库）、**Metadata: read**（平台强制）。
+细粒度 PAT 的权限集完全一样（它按仓库授权，作用范围更窄）。
 
 ```bash
 # 对真实 PR 发一次：本地仓库用 --repo，发布目标由 --repo-full-name / --pr 决定
