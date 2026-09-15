@@ -186,7 +186,7 @@ webhook worker 与 `acra worker` 会自动走同一条发布路径；
 触发层  trigger/            webhook 验签 → 规范化 ReviewJob → 入队（绝不在此做克隆或 LLM 调用）
 编排层  orchestrator/       幂等 / 增量 / 预算守卫 / 降级决策 / pipeline 端到端编排
 仓库层  repo/               gateway（git）· diff_parser · line_mapper · symbol_index（tree-sitter）
-上下文  context/            budget（§7.3 预算分配）· builder（L1/L2）· chunker（§7.4 语法边界分块）
+上下文  context/            budget（§7.3 预算分配）· builder（L1/L2）· chunker（§7.4 语法边界分块）· retriever（L3 线索）
 静态分析 analysis/          risk_rules（高风险/低价值判定）· sarif（解析与 diff-aware 过滤）
 引擎    engine/             llm_client · scan（Phase 1）· verify（Phase 2）· merge · prompts/ · schemas/
 校验    postprocess/        validator（§9.1 八步流水线）· dedupe · ranker（§9.2/§9.3）
@@ -580,6 +580,17 @@ MiMo 的思考 token 计入 `max_completion_tokens`。预算给小了会出现
 ./.venv/Scripts/python.exe scripts/run_checks.py   # ruff + pytest（写 .acra-work/checks_result.txt）
 ./.venv/Scripts/python.exe scripts/e2e_gate.py     # 门禁退出码（写 .acra-work/e2e_gate.txt）
 ```
+
+上下文装配有两支**离线**检视脚本（不调模型、不花钱），用来回答"那一层到底有没有内容"：
+
+```bash
+./.venv/Scripts/python.exe examples/build_l3_demo.py    # 生成能自然触发 L3 的演示仓库
+./.venv/Scripts/python.exe scripts/inspect_l2.py        # L2：被引用类型签名有没有进去
+./.venv/Scripts/python.exe scripts/inspect_l3.py        # L3：反向引用/相似实现有没有进去
+```
+
+之所以要专门检视：`callers=[]` 与 `similar_impls=[]` 都是**合法返回值**，
+和"确实没有调用方"长得一模一样 —— 只看返回值无法区分"这一层没建成"与"这次确实没有"。
 
 还有一条**不在 CI 里跑**的验证 —— 它会真实建 PR、发评论、关 PR，需要发布凭据：
 
