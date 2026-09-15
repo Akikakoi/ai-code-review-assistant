@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -37,6 +38,19 @@ class RepoConfigView:
     daily_budget_micros: int = 5_000_000
 
 
+def stable_external_id(full_name: str) -> int:
+    """本地模式没有平台侧 ID，用 full_name 的**跨进程稳定**哈希兜底。
+
+    **不能用内置 `hash()`。** 字符串哈希带进程级随机化（PYTHONHASHSEED），
+    同一仓库在不同进程里会算出不同的 ID —— 而本地审查每跑一次就是一个新进程。
+    后果不是"多几行数据"那么轻：`last_reviewed_sha` 按 repository_id 查，
+    repository_id 每次都变就意味着**增量审查永远找不到基线，静默退化成全量重审**。
+    而且它在单进程测试里完全看不出来（同一进程内 `hash()` 是稳定的）。
+    """
+    digest = hashlib.blake2b(full_name.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") % (10**12)
+
+
 def get_or_create_repository(
     session: Session,
     *,
@@ -48,7 +62,7 @@ def get_or_create_repository(
     # 本地模式没有平台侧 ID，用 full_name 的稳定哈希兜底，保证同一仓库可复用。
     # 必须在查询之前算出来：否则查询用 0、写入用哈希，第二次调用必然撞唯一约束。
     if external_id is None:
-        external_id = abs(hash(full_name)) % (10**12)
+        external_id = stable_external_id(full_name)
 
     stmt = select(Repository).where(
         Repository.platform == platform, Repository.external_id == external_id
@@ -226,26 +240,49 @@ def record_tool_call(
     return row
 
 
+#: 只有**真正覆盖了完整 diff** 的运行才有资格当增量基线。
+#:
+#: - `failed`：压根没审出东西。把它当基线，等于这段代码被永久跳过；
+#: - `queued`：还没跑完；
+#: - `degraded`：分析范围不完整（模型不可用、上下文截断、预算熔断）。
+#:   拿它当基线会把"这一轮没审到的那部分"永久跳过。
+#:
+#: 收紧到 `succeeded` 的唯一代价是"降级之后会重审全量"，而收益是避免静默漏审 ——
+#: 后者是最难发现的一类缺陷：它表现为"之后几轮都很安静"，看起来像质量变好了。
+INCREMENTAL_BASELINE_STATUSES = ("succeeded",)
+
+
 def last_reviewed_sha(session: Session, repository_id: int, pr_number: int) -> str | None:
-    """增量审查依据：该 PR 上一次成功审查的 head_sha（文档 §4.2）。"""
+    """增量审查依据：该 PR 上一次**成功**审查的 head_sha（文档 §4.2）。"""
     stmt = (
         select(ReviewRun.head_sha)
         .where(
             ReviewRun.repository_id == repository_id,
             ReviewRun.pr_number == pr_number,
             ReviewRun.merge_base_sha.is_not(None),
+            ReviewRun.status.in_(INCREMENTAL_BASELINE_STATUSES),
         )
-        .order_by(ReviewRun.created_at.desc())
+        .order_by(ReviewRun.created_at.desc(), ReviewRun.id.desc())
         .limit(1)
     )
     return session.scalar(stmt)
 
 
 def last_merge_base(session: Session, repository_id: int, pr_number: int) -> str | None:
+    """与 `last_reviewed_sha` 取**同一次**运行，否则两者可能来自不同轮次：
+
+    比如上一轮 succeeded 记了 head=H1，之后一轮 failed 记了 mb=M2 ——
+    只按时间取 merge_base 会把 M2 与 H1 配成一对，凭空判出"rebase 了"。
+    """
     stmt = (
         select(ReviewRun.merge_base_sha)
-        .where(ReviewRun.repository_id == repository_id, ReviewRun.pr_number == pr_number)
-        .order_by(ReviewRun.created_at.desc())
+        .where(
+            ReviewRun.repository_id == repository_id,
+            ReviewRun.pr_number == pr_number,
+            ReviewRun.merge_base_sha.is_not(None),
+            ReviewRun.status.in_(INCREMENTAL_BASELINE_STATUSES),
+        )
+        .order_by(ReviewRun.created_at.desc(), ReviewRun.id.desc())
         .limit(1)
     )
     return session.scalar(stmt)

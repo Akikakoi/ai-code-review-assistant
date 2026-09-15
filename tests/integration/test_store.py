@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 import pytest
 
 from acra.models import Finding
@@ -199,3 +203,97 @@ def test_postgres_url_normalization() -> None:
     assert normalize_url("postgresql://u:p@h/db") == "postgresql+psycopg://u:p@h/db"
     assert normalize_url("postgres://u:p@h/db") == "postgresql+psycopg://u:p@h/db"
     assert normalize_url("sqlite:///x.db") == "sqlite:///x.db"
+
+
+def test_external_id_is_stable_across_processes(tmp_path) -> None:
+    """本地仓库 ID 必须**跨进程**稳定：每跑一次审查就是一个新进程。
+
+    用真实子进程 + 不同 PYTHONHASHSEED 验证。必须这样测：
+    内置 `hash()` 的随机化只在跨进程时才暴露，同进程内断言会全部通过 ——
+    这正是这个 bug 能长期存活的原因（repository_id 每次都变 ⇒ 增量审查静默退化成全量）。
+    """
+    from acra.store.repository import stable_external_id
+
+    code = (
+        "import sys; sys.path.insert(0, 'src');"
+        "from acra.store.repository import stable_external_id as f;"
+        "print(f('owner/repo'))"
+    )
+    seen = set()
+    for seed in ("0", "1", "12345"):
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env={**os.environ, "PYTHONHASHSEED": seed},
+        )
+        assert proc.returncode == 0, proc.stderr
+        seen.add(proc.stdout.strip())
+
+    assert len(seen) == 1, f"不同进程算出了不同 ID：{seen}"
+    assert seen == {str(stable_external_id("owner/repo"))}
+
+
+def test_external_id_separates_different_repos() -> None:
+    from acra.store.repository import stable_external_id
+
+    ids = {stable_external_id(name) for name in ("o/a", "o/b", "local/x", "local/y")}
+    assert len(ids) == 4
+
+
+# ---------------------------------------------------------------------------- 增量基线
+
+
+def _run_with_status(db, repo_id: int, pr: int, *, head: str, mb: str, status: str) -> None:
+    with db.session() as session:
+        run = start_run(
+            session,
+            job_id=f"job-{head}-{status}",
+            repository_id=repo_id,
+            pr_number=pr,
+            base_sha="base",
+            head_sha=head,
+            merge_base_sha=mb,
+            trigger_source="cli",
+            mode="full",
+        )
+        finish_run(session, run, status=status)
+
+
+@pytest.mark.parametrize("status", ["failed", "queued", "degraded"])
+def test_non_succeeded_runs_are_not_incremental_baselines(tmp_path, status: str) -> None:
+    """没覆盖完整 diff 的运行不能当增量基线 —— 否则那段代码会被**永久静默跳过**。
+
+    这是最难发现的一类漏审：它表现为"之后几轮都很安静"，看起来像质量变好了。
+    """
+    db = _db(tmp_path)
+    try:
+        with db.session() as session:
+            repo = get_or_create_repository(session, full_name="o/r")
+            repo_id = repo.id
+        _run_with_status(db, repo_id, 5, head="H1", mb="MB1", status=status)
+
+        with db.session() as session:
+            assert last_reviewed_sha(session, repo_id, 5) is None
+            assert last_merge_base(session, repo_id, 5) is None
+    finally:
+        db.dispose()
+
+
+def test_only_succeeded_run_becomes_baseline_even_if_newer_runs_failed(tmp_path) -> None:
+    """在成功的运行之后又发生了失败：基线仍应停在成功的那一轮。"""
+    db = _db(tmp_path)
+    try:
+        with db.session() as session:
+            repo = get_or_create_repository(session, full_name="o/r")
+            repo_id = repo.id
+        _run_with_status(db, repo_id, 5, head="H1", mb="MB1", status="succeeded")
+        _run_with_status(db, repo_id, 5, head="H2", mb="MB2", status="failed")
+
+        with db.session() as session:
+            # 关键：head 与 merge_base 必须来自**同一次**运行，不能 H1 配 MB2
+            assert last_reviewed_sha(session, repo_id, 5) == "H1"
+            assert last_merge_base(session, repo_id, 5) == "MB1"
+    finally:
+        db.dispose()
