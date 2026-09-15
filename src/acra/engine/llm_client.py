@@ -89,10 +89,28 @@ def compute_cost(
     *,
     prompt_tokens: int,
     completion_tokens: int,
+    cached_tokens: int = 0,
 ) -> int:
-    """成本（微美元）。单价未配置时记 0，不臆造价格。"""
+    """成本（微元，1 微元 = 1e-6 元）。单价未配置时记 0，不臆造价格。
+
+    缓存命中的输入必须**单独计价**：供应商对这两档的价差极大
+    （实测 MiMo-V2.5-Pro 是 ¥3.00 vs ¥0.025 / 1M，相差 120 倍）。
+    把它按全价算会让成本被严重高估 —— 而"重复 push 成本下降多少"这件事，
+    恰恰完全依赖缓存命中的占比。
+
+    `cached_tokens` 未单独配价时按**全额输入价**计（保守：宁可高估也不低估，
+    否则预算守卫会被绕过）。`cached_tokens` 超过 `prompt_tokens` 时按 0 截断，
+    避免供应商回包异常导致成本变成负数。
+    """
+    cached = min(max(0, cached_tokens), max(0, prompt_tokens))
+    uncached = max(0, prompt_tokens - cached)
+    cached_price = (
+        settings.llm_cached_input_price_micros_per_mtok
+        or settings.llm_input_price_micros_per_mtok
+    )
     return int(
-        prompt_tokens / 1_000_000 * settings.llm_input_price_micros_per_mtok
+        uncached / 1_000_000 * settings.llm_input_price_micros_per_mtok
+        + cached / 1_000_000 * cached_price
         + completion_tokens / 1_000_000 * settings.llm_output_price_micros_per_mtok
     )
 
@@ -253,6 +271,7 @@ class LLMClient:
                 self.settings,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
+                cached_tokens=cached,
             ),
             phase=phase,
         )

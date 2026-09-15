@@ -70,8 +70,8 @@ def evaluate(
     if priced and daily_budget > 0 and daily_cost_micros >= daily_budget:
         decision.allowed = False
         decision.notes.append(
-            f"当日累计成本 {daily_cost_micros} 微美元已达日预算 {daily_budget}，"
-            "暂停自动审查，仅响应手动触发"
+            f"当日累计成本 ¥{daily_cost_micros / 1_000_000:.4f}已达日预算 "
+            f"¥{daily_budget / 1_000_000:.4f}，暂停自动审查，仅响应手动触发"
         )
     if (
         run_budget_micros is not None

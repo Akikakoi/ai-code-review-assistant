@@ -46,8 +46,15 @@ class Settings(BaseSettings):
     # MiMo 等带思考的模型会把 reasoning token 计入 max_completion_tokens，故留足预算
     llm_max_completion_tokens: int = 8192
     llm_max_retries: int = 2
+    #: 单价，单位都是 **微元 / 1M tokens**（1 微元 = 1e-6 元）。
+    #: 刻意用人民币：供应商按人民币计价，若这里写成美元就要引入一个隐形的汇率常数，
+    #: 而 summary 里打印的是"元"—— 两边对不上时没有任何地方会报错。
     llm_input_price_micros_per_mtok: int = 0
     llm_output_price_micros_per_mtok: int = 0
+    #: 缓存命中的输入价。两档价差极大（MiMo-V2.5-Pro：¥3.00 vs ¥0.025 / 1M），
+    #: 不单独配就会把命中部分按全价算，成本被严重高估。
+    #: 留空则按全额输入价计（保守方向，不会让预算守卫失效）。
+    llm_cached_input_price_micros_per_mtok: int = 0
 
     # ---------------- 存储 ----------------
     database_url: str = ""
