@@ -103,3 +103,28 @@ async def open_publisher(access: GithubAccess) -> AsyncIterator[GithubPublisher 
 def reset_app_auth_cache() -> None:
     """测试用：清掉复用的 App 客户端。"""
     _APP_AUTH_CACHE.clear()
+
+
+def describe_credentials(settings) -> tuple[str, str]:
+    """不发起任何请求地报告发布凭据状态，供 `acra doctor` 使用。
+
+    为什么值得单列一行：凭据有没有配，直接决定"到底会不会有评论发出去"。
+    这件事此前只能靠读运行日志反推 —— 而 `acra doctor` 正是用来回答这类问题的。
+    """
+    if settings.acra_github_token:
+        return SOURCE_STATIC, "已配置静态 token（本地/CI 验证用）"
+
+    if not (settings.github_app_id and settings.github_app_private_key_path):
+        return SOURCE_NONE, "未配置（审查结果只在本地产出，不会发布评论）"
+
+    from pathlib import Path
+
+    key_path = Path(settings.github_app_private_key_path)
+    if not key_path.exists():
+        return SOURCE_APP, f"私钥文件不存在：{key_path}"
+    if not settings.github_app_installation_id:
+        return SOURCE_APP, "缺少 GITHUB_APP_INSTALLATION_ID（CLI 发布时必填）"
+    return (
+        SOURCE_APP,
+        f"App {settings.github_app_id} / installation {settings.github_app_installation_id}",
+    )

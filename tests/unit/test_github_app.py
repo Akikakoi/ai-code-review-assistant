@@ -35,6 +35,7 @@ from acra.publish.factory import (
     SOURCE_NONE,
     SOURCE_STATIC,
     GithubAccess,
+    describe_credentials,
     open_publisher,
     reset_app_auth_cache,
     resolve_access,
@@ -261,3 +262,37 @@ def test_access_is_json_friendly_for_logging() -> None:
     payload = asdict(GithubAccess())
     assert set(payload) == {"token", "source", "installation_id", "api_base", "error"}
     json.dumps(payload)
+
+
+# ---------------------------------------------------------------------------- doctor 口径
+
+
+def test_describe_credentials_reports_each_state(key_file, tmp_path) -> None:
+    """doctor 的这一行要能回答"到底会不会有评论发出去"，四种状态都必须可区分。"""
+    source, detail = describe_credentials(_settings())
+    assert source == SOURCE_NONE
+    assert "不会发布评论" in detail
+
+    source, detail = describe_credentials(_settings(acra_github_token="ghp_x"))
+    assert source == SOURCE_STATIC
+
+    base = {"github_app_id": "1", "github_app_private_key_path": str(tmp_path / "missing.pem")}
+    source, detail = describe_credentials(_settings(**base))
+    assert source == SOURCE_APP
+    assert "私钥文件不存在" in detail
+
+    source, detail = describe_credentials(
+        _settings(github_app_id="1", github_app_private_key_path=str(key_file))
+    )
+    assert source == SOURCE_APP
+    assert "INSTALLATION_ID" in detail
+
+    source, detail = describe_credentials(
+        _settings(
+            github_app_id="1",
+            github_app_private_key_path=str(key_file),
+            github_app_installation_id="42",
+        )
+    )
+    assert source == SOURCE_APP
+    assert "42" in detail and "不会发布评论" not in detail

@@ -438,6 +438,17 @@ def doctor() -> None:
         rows.append(("database", "fail", f"{type(exc).__name__}: {exc}"))
 
     rows.append(("redis", "ok" if settings.redis_url else "info", settings.redis_url or "未配置（用内存缓存/队列）"))
+
+    from acra.publish.factory import SOURCE_NONE, describe_credentials
+
+    cred_source, cred_detail = describe_credentials(settings)
+    rows.append(
+        (
+            "发布凭据",
+            "ok" if cred_source != SOURCE_NONE else "warn",
+            f"[{cred_source}] {cred_detail}",
+        )
+    )
     rows.append(
         (
             "sandbox",
