@@ -118,8 +118,25 @@ def scenarios(repo: Path, tmp: Path) -> list[Scenario]:
             expected_rc=EXIT_BAD_ARGS,
         ),
         Scenario(
-            name="--pr 与 --base/--head 互斥仍然成立（非发布场景）",
-            args=["--repo", str(repo), "--base", "main", "--head", "feature/tweak", "--pr", "1"],
+            name="--pr 与 --base/--head 可并用（增量审查需要 pr_number 作基线）",
+            args=[
+                "--repo",
+                str(repo),
+                "--base",
+                "main",
+                "--head",
+                "feature/tweak",
+                "--pr",
+                "1",
+                "--no-llm",
+                "--no-store",
+            ],
+            expected_rc=EXIT_OK,
+            must_contain="[高]",
+        ),
+        Scenario(
+            name="--pr 非正整数返回 2",
+            args=["--repo", str(repo), "--pr", "0"],
             expected_rc=EXIT_BAD_ARGS,
         ),
         Scenario(

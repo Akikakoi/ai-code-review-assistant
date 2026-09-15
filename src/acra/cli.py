@@ -8,7 +8,7 @@ acra review [OPTIONS]
 --repo PATH             仓库路径，默认当前目录
 --base REF              基线引用（分支/tag/SHA）
 --head REF              目标引用，默认 HEAD
---pr NUMBER             平台 PR 号；`--publish` 时作为发布目标，与 --base/--head 并用
+--pr NUMBER             PR 号（幂等键 / 增量基线 / 发布目标），与 --base/--head 并用
 --format text|json|sarif
 --out FILE              输出文件，缺省打到 stdout
 --level 1|2|3           强制上下文层级（调试用）
@@ -92,7 +92,10 @@ def review(
     base: str = typer.Option(None, "--base", help="基线引用（分支/tag/SHA）"),
     head: str = typer.Option(None, "--head", help="目标引用，默认 HEAD"),
     pr: int = typer.Option(
-        None, "--pr", help="平台 PR 号；指定发布目标时配合 --publish 使用"
+        None,
+        "--pr",
+        help="PR 号：用作幂等键与增量基线，也是 --publish 的发布目标；"
+        "不会去平台拉取 ref（审查范围仍由 --base/--head 决定）",
     ),
     fmt: str = typer.Option("text", "--format", help="输出格式：text | json | sarif"),
     out: str = typer.Option(None, "--out", help="输出文件，缺省打到 stdout"),
@@ -115,12 +118,8 @@ def review(
     """审查一次变更。"""
     if fmt not in FORMATS:
         raise typer.BadParameter(f"--format 只能是 {'|'.join(FORMATS)}")
-    if pr is not None and (base or head) and not publish:
-        # 平台模式下 `--pr` 是"审查范围由平台解析"的入口，与显式 ref 语义重叠；
-        # 但发布时 `--pr` 只是**发布目标**，diff 仍要由 --base/--head 指定 —— 二者不冲突。
-        raise typer.BadParameter(
-            "--pr 与 --base/--head 互斥；若要发布到该 PR，请配合 --publish 使用"
-        )
+    if pr is not None and pr < 1:
+        raise typer.BadParameter("--pr 必须是正整数")
     if level is not None and level not in (1, 2, 3):
         raise typer.BadParameter("--level 只能是 1|2|3")
     if fail_on is not None and fail_on not in ("high", "medium"):
@@ -151,7 +150,7 @@ def review(
         base_ref=base,
         head_ref=head,
         pr_number=pr,
-        repo_full_name=Path(repo).name or "local/repo",
+        repo_full_name=repo_full_name or Path(repo).name or "local/repo",
         force_full=full,
     )
 
