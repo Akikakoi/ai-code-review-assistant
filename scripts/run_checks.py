@@ -38,7 +38,9 @@ def main() -> int:
     junit = OUT_DIR / "junit.xml"
     results: dict[str, object] = {}
 
-    rc_ruff, out_ruff = run([python, "-m", "ruff", "check", "src", "tests"])
+    # scripts/ 必须一起查：e2e 脚本与检视脚本同样会被 CI 和人手工跑，
+    # 游离在 lint 之外意味着它们的坏味道只会在"要用它的时候"才暴露。
+    rc_ruff, out_ruff = run([python, "-m", "ruff", "check", "src", "tests", "scripts"])
     results["ruff"] = {"returncode": rc_ruff, "tail": out_ruff.strip().splitlines()[-3:]}
 
     run([python, "-m", "pytest", "-q", "-p", "no:cacheprovider", f"--junitxml={junit}"])

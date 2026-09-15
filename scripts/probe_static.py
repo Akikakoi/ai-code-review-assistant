@@ -14,7 +14,6 @@ from acra.analysis.static_runner import (  # noqa: E402
     resolve_command,
     run_static_analysis,
 )
-from acra.models import ChangeType, FileDiff, Hunk  # noqa: E402
 from acra.repo import gateway  # noqa: E402
 from acra.repo.diff_parser import build_diff_set  # noqa: E402
 from acra.settings import get_settings  # noqa: E402
