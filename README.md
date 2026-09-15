@@ -592,15 +592,23 @@ MiMo 的思考 token 计入 `max_completion_tokens`。预算给小了会出现
 之所以要专门检视：`callers=[]` 与 `similar_impls=[]` 都是**合法返回值**，
 和"确实没有调用方"长得一模一样 —— 只看返回值无法区分"这一层没建成"与"这次确实没有"。
 
-还有一条**不在 CI 里跑**的验证 —— 它会真实建 PR、发评论、关 PR，需要发布凭据：
+还有两条**不在 CI 里跑**的验证 —— 都会写真实平台、需要凭据：
 
 ```bash
+# publish：建 PR → 真发 review → 从平台侧回读断言 → 关 PR
 ./.venv/Scripts/python.exe scripts/e2e_publish.py --branch <已推送的测试分支>
-# 断言全部从平台侧回读：PR 上是否真的有本工具发的 review、评论数是否一致、重复发布是否幂等
+
+# webhook：起真实 ASGI 服务 → 投递带 HMAC 签名的事件 → 入队 → worker → 发布
+./.venv/Scripts/python.exe scripts/e2e_webhook.py --branch <已推送的测试分支>
+#   另含两个反例：篡改签名必须 401 且无副作用；同 delivery 重投必须幂等
 ```
 
-首次跑通它找出了三个离线测试结构上覆盖不到的问题（Check Run 的权限边界、
-summary 缺幂等标记、交叉验证误判真结论），见 [`docs/adr/0014`](docs/adr/0014-first-real-publish-e2e.md)。
+它们的断言**全部从平台侧回读**：本地返回值只说明"我发了什么"，
+平台侧才说明"有没有到"。首次跑通各自找出至少一个离线测试结构上覆盖不到的问题
+（见 [`docs/adr/0014`](docs/adr/0014-first-real-publish-e2e.md) 与
+[`docs/adr/0015`](docs/adr/0015-shallow-clone-merge-base.md)）——
+其中 0015 那个是**只有生产入口才会走到的路径**：浅克隆下 merge-base 必然失败，
+CLI 与单测都不可能发现。
 
 ### 门禁退出码契约是被真实进程验证过的
 
