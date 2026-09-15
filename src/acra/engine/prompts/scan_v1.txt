@@ -1,0 +1,11 @@
+以下是一次 Pull Request 的第 $index/$total 个代码块。
+
+【变更文件】$path
+【变更类型】$change_type
+【本块的变更行号集合】$added_line_numbers
+   ↑ 你只能在这个集合内选择行号。选择集合外的行号会让该条结论被直接丢弃。
+
+$repo_content_block
+
+请找出本块中值得作者修改的缺陷，输出 JSON 数组。
+如果没有值得报告的问题，输出 []。

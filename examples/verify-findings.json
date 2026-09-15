@@ -1,0 +1,126 @@
+{
+  "findings": [
+    {
+      "path": "src/main/java/com/example/order/OrderRepository.java",
+      "line": 10,
+      "end_line": 11,
+      "category": "security",
+      "severity": "blocker",
+      "confidence": 0.95,
+      "score": 1.0,
+      "title": "SQL 注入漏洞：参数直接拼接 SQL 查询字符串",
+      "body": "现象：SQL 查询通过字符串拼接构建，将 status 参数直接嵌入到 SQL 字符串中。触发条件：当 status 参数包含 SQL 特殊字符（如单引号）或恶意 SQL 代码时。影响：导致 SQL 注入攻击，攻击者可执行任意 SQL 命令，可能泄露、修改或删除数据库数据。修复建议：使用参数化查询，恢复占位符和参数值。",
+      "suggestion": "return jdbc.query(\"select * from orders where status = ?\", status);",
+      "evidence": [
+        "String sql = \"select * from orders where status = '\" + status + \"'\";",
+        "return jdbc.query(sql);"
+      ],
+      "evidence_rule_ids": [],
+      "needs_human_judgment": false,
+      "verify_verdict": "confirmed",
+      "merged_sources": 1,
+      "source": "llm",
+      "tool": null
+    },
+    {
+      "path": "src/main/java/com/example/order/FileExportService.java",
+      "line": 9,
+      "end_line": null,
+      "category": "bug",
+      "severity": "high",
+      "confidence": 0.95,
+      "score": 1.0,
+      "title": "FileInputStream 资源泄露",
+      "body": "现象：FileInputStream 对象未在 finally 或 try-with-resources 中关闭。触发条件：当 in.readAllBytes() 或 new String(data) 执行时抛出异常，或正常返回后，流都不会被关闭。影响：每次调用都可能泄漏一个文件句柄，长时间运行可能导致文件描述符耗尽，进而引发 \"Too many open files\" 错误。修复建议：使用 try-with-resources 语句确保流被自动关闭。",
+      "suggestion": "try (FileInputStream in = new FileInputStream(path)) {\n    byte[] data = in.readAllBytes();\n    return new String(data);\n}",
+      "evidence": [
+        "FileInputStream in = new FileInputStream(path);"
+      ],
+      "evidence_rule_ids": [],
+      "needs_human_judgment": false,
+      "verify_verdict": "confirmed",
+      "merged_sources": 1,
+      "source": "llm",
+      "tool": null
+    }
+  ],
+  "stats": {
+    "files_analyzed": 3,
+    "lines_changed": 6,
+    "context_level_max": 2,
+    "input_tokens": 9061,
+    "output_tokens": 7686,
+    "cost_micros": 0,
+    "mode": "full",
+    "ai_available": true,
+    "degrade_notes": [
+      "静态检查未执行：semgrep:未安装、checkstyle:未安装",
+      "Verify：确认 3；驳回 0；存疑 0；驳回率 0%"
+    ],
+    "static_tools": []
+  },
+  "dropped": [
+    {
+      "step": "8_threshold",
+      "reason": "confidence<0.65",
+      "raw": {
+        "path": "src/main/java/com/example/order/OrderService.java",
+        "line": 11,
+        "end_line": null,
+        "category": "bug",
+        "severity": "high",
+        "confidence": 0.95,
+        "title": "条件逻辑错误导致空指针异常",
+        "body": "现象：当 userId 为 null 时，调用 pay 方法会抛出 NullPointerException 而非 IllegalArgumentException。触发条件：userId 参数为 null。影响：程序崩溃，未正确处理空输入。修复建议：将条件逻辑与 '&&' 改回逻辑或 '||'，避免在 null 上调用 isEmpty()。",
+        "suggestion": "if (userId == null || userId.isEmpty()) {",
+        "evidence": [
+          "第11行从 '||' 改为 '&&'，导致在 userId 为 null 时调用 isEmpty() 方法，触发 NPE。"
+        ],
+        "needs_human_judgment": false,
+        "_verify_verdict": "confirmed",
+        "_verify_reason": "条件使用 && 导致 userId 为 null 时抛出 NPE，而非 IllegalArgumentException，是本次变更引入的明确缺陷",
+        "_evidence_not_in_diff": true,
+        "_adjustments": [
+          "evidence_not_in_added_lines:1 条代码证据均未命中新增行"
+        ]
+      }
+    }
+  ],
+  "job": {
+    "job_id": "c549fee1-0a60-4a75-a9c2-57ce8afcb85c",
+    "mode": "full",
+    "files_analyzed": 3,
+    "lines_changed": 6,
+    "chunks": 3,
+    "raw_candidates": 3,
+    "findings_kept": 2,
+    "findings_reported": 2,
+    "context_level_max": 2,
+    "dropped": 1,
+    "usage": {
+      "calls": 6,
+      "prompt_tokens": 9061,
+      "completion_tokens": 7686,
+      "cached_tokens": 0,
+      "cost_micros": 0,
+      "per_phase": {
+        "scan": 7187,
+        "verify": 9560
+      }
+    },
+    "degrade_notes": [
+      "静态检查未执行：semgrep:未安装、checkstyle:未安装",
+      "Verify：确认 3；驳回 0；存疑 0；驳回率 0%"
+    ],
+    "summary": "## 代码审查摘要\n\n共发现 2 个问题（阻断 1 / 高 1），已按重要性排序。\n\n### 高优先级\n- `src/main/java/com/example/order/OrderRepository.java:10` SQL 注入漏洞：参数直接拼接 SQL 查询字符串\n- `src/main/java/com/example/order/FileExportService.java:9` FileInputStream 资源泄露\n\n\n<details><summary>本次分析范围与降级说明</summary>\n\n- 分析文件 3 个，变更行 6 行\n- 已启用上下文层级：L1 + L2（未触发仓库级检索）\n- 静态检查：未启用\n- AI 分析：正常\n- 运行模式：full\n- 成本：输入 9,061 tokens / 输出 7,686 tokens\n- 降级说明：静态检查未执行：semgrep:未安装、checkstyle:未安装；Verify：确认 3；驳回 0；存疑 0；驳回率 0%\n\n</details>\n\n<sub>由 acra 生成 · 回复 `/acra ignore` 可跳过本 PR 后续审查</sub>",
+    "duration_ms": 149175,
+    "run_id": 14,
+    "publish": null,
+    "error": null,
+    "verify_rejection_rate": 0.0,
+    "sources": {
+      "llm": 2,
+      "static": 0
+    }
+  }
+}

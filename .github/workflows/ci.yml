@@ -1,0 +1,149 @@
+# CI 门禁。
+#
+# 阻断性与信息性在任务名里就写清楚 —— 混在一起会让"CI 红了"变成一句没有信息量的话。
+#   blocking: checks（ruff + pytest）、gate-e2e（退出码契约）
+#   info    : offline-eval（纯静态基线）、self-review（用 acra 审自己，需要密钥）
+#
+# 门禁本身（`--fail-on` 的 0/1/2/3 退出码）由 `scripts/e2e_gate.py` 端到端验证：
+# 它跑真实子进程、断言真实退出码，并且额外断言"退出码 1 是由一条真实高危结论触发的"，
+# 否则一次空跑也会让退出码恰好等于期望值。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  checks:
+    name: blocking · ruff + pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: 安装
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: ruff 静态检查
+        run: python -m ruff check src tests
+      - name: pytest
+        run: python -m pytest -q --junitxml=.acra-work/junit.xml
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit
+          path: .acra-work/junit.xml
+          if-no-files-found: warn
+
+  gate-e2e:
+    name: blocking · CI 门禁退出码端到端
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: 安装
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: 门禁退出码自检（0 / 1 / 2 / 3）
+        run: python scripts/e2e_gate.py
+      - name: 上传结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-gate
+          path: .acra-work/e2e_gate.txt
+          if-no-files-found: warn
+
+  offline-eval:
+    name: info · 纯静态评估基线
+    needs: checks
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: 安装
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      # 目标未达标时本命令会返回 1，因此这个任务刻意设为 continue-on-error：
+      # 基线是给人看的趋势，不是阻断条件（真正的质量门禁是真实模型跑分 + 人工判定）。
+      - name: 全量纯静态基线（80+ 用例，离线）
+        run: python -m acra.cli eval run --no-llm --out .acra-work/eval/baseline.json
+      - name: 上传基线报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-eval-baseline
+          path: .acra-work/eval/baseline.json
+          if-no-files-found: warn
+
+  self-review:
+    name: info · 用 acra 审自己（需 LLM_API_KEY）
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # merge-base 与 base sha 都需要完整历史，浅克隆算不对
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: 安装
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: 审查本次 PR（不发布，只产出文本）
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_BASE: ${{ vars.LLM_API_BASE || 'https://api.xiaomimimo.com/v1' }}
+        run: |
+          if [ -z "$LLM_API_KEY" ]; then
+            echo "未配置 LLM_API_KEY，跳过自审。" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python -m acra.cli review \
+            --repo . \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.sha }}" \
+            --dry-run \
+            --out .acra-work/self-review.txt || true
+          {
+            echo "## acra 自审结果"
+            echo '```'
+            cat .acra-work/self-review.txt 2>/dev/null || echo "(无输出)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: 上传自审结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-review
+          path: .acra-work/self-review.txt
+          if-no-files-found: warn

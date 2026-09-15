@@ -1,0 +1,31 @@
+acra · head=34409670b140
+
+[阻断] src/main/java/com/example/order/OrderRepository.java:10  (security, conf=1.00, score=1.00)
+      SQL注入漏洞：直接拼接字符串构建SQL查询
+      现象：第10行将`status`参数直接拼接到SQL语句字符串中，而非使用参数化查询。触发条件：当`status`参数来自外部用户输入时。影响：攻击者可以通过构造恶意`status`值（如 `' OR '1'='1`）绕过查询条件、泄露或篡改数据库数据，严重破坏系统安全。修复建议：恢复使用`?`占位符的参数化查询，将`status`作为参数传入`jdbc.query(sql, status)`。
+      --- 建议改写 ---
+      return jdbc.query("select * from orders where status = ?", status);
+
+[阻断] src/main/java/com/example/order/OrderService.java:11  (bug, conf=0.95, score=1.00)
+      逻辑与操作符错误导致空指针异常或无效校验
+      原代码为 `userId == null || userId.isEmpty()`，变更后变为 `userId == null && userId.isEmpty()`。
+      当 userId 为 null 时，`userId == null` 为 true，但 `userId.isEmpty()` 会抛出 NullPointerException。
+      当 userId 不为 null 时，`userId == null` 为 false，导致整个条件短路为 false，校验失效。
+      因此，当 userId 为 null 时，会抛出 NPE；当 userId 不为 null 时，无论是否为空字符串，校验均被绕过，可能导致后续业务逻辑错误或数据写入异常。
+      --- 建议改写 ---
+      if (userId == null || userId.isEmpty()) {
+
+[高] src/main/java/com/example/order/FileExportService.java:9  (bug, conf=0.90, score=1.00)
+      资源泄漏：FileInputStream未关闭，可能导致文件描述符耗尽
+      现象：FileInputStream在读取字节后未关闭。
+      触发条件：任何调用export方法的路径。
+      影响：文件描述符不会被及时释放，长时间运行后可能耗尽系统资源，导致后续文件操作失败。
+      修复建议：使用try-with-resources语句确保资源自动关闭。
+      --- 建议改写 ---
+      try (FileInputStream in = new FileInputStream(path)) {
+          byte[] data = in.readAllBytes();
+          return new String(data);
+      }
+
+共 3 条结论；候选被丢弃 0 条；上下文最高层级 L2；tokens 输入 4116 / 输出 716
+降级：静态检查未执行：static_analysis_disabled

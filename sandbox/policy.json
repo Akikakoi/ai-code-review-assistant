@@ -1,0 +1,89 @@
+{
+  "$comment": "acra 沙箱执行策略。阶段三由 tool_runtime / static_runner 读取，集中定义'什么能在容器里跑、允许怎么跑'，避免这些约束散落在代码里被逐步放宽（ADR 0005 / 文档 §12.2）。",
+  "version": 1,
+  "image": "acra-sandbox:latest",
+  "enabled": false,
+  "defaults": {
+    "network": "none",
+    "read_only_root": true,
+    "user": "1000:1000",
+    "memory": "2g",
+    "memory_swap": "2g",
+    "cpus": 2,
+    "pids_limit": 256,
+    "timeout_seconds": 120,
+    "workspace": {
+      "mount": "/workspace",
+      "mode": "ro"
+    },
+    "tmpfs": [
+      {
+        "path": "/tmp",
+        "options": "rw,noexec,nosuid,size=512m"
+      }
+    ]
+  },
+  "forbidden": [
+    "--privileged",
+    "--cap-add",
+    "--pid=host",
+    "--network=host",
+    "mount:/var/run/docker.sock",
+    "mount:/root",
+    "mount:~/.ssh",
+    "env:ACRA_LLM_API_KEY",
+    "env:GITHUB_APP_PRIVATE_KEY"
+  ],
+  "tools": {
+    "semgrep": {
+      "language": "any",
+      "argv": ["semgrep", "--sarif", "--no-git-ignore", "-c", "p/security-audit", "/workspace"],
+      "timeout_seconds": 120,
+      "output_format": "sarif"
+    },
+    "checkstyle": {
+      "language": "java",
+      "argv": ["java", "-jar", "/opt/tools/java/checkstyle.jar", "-f", "sarif", "-c", "/workspace/checkstyle.xml", "/workspace"],
+      "timeout_seconds": 120,
+      "output_format": "sarif",
+      "requires_repo_config": "checkstyle.xml"
+    },
+    "spotbugs": {
+      "language": "java",
+      "argv": ["java", "-jar", "/opt/tools/java/spotbugs/lib/spotbugs.jar", "-sarif", "-output", "/tmp/spotbugs.sarif", "/workspace"],
+      "timeout_seconds": 120,
+      "output_format": "sarif",
+      "requires_build_output": true
+    },
+    "eslint": {
+      "language": "typescript",
+      "argv": ["eslint", "--format", "@microsoft/eslint-formatter-sarif", "/workspace"],
+      "timeout_seconds": 120,
+      "output_format": "sarif"
+    },
+    "tsc": {
+      "language": "typescript",
+      "argv": ["tsc", "--noEmit", "--pretty", "false", "-p", "/workspace"],
+      "timeout_seconds": 120,
+      "output_format": "text"
+    },
+    "ruff": {
+      "language": "python",
+      "argv": ["ruff", "check", "--output-format", "sarif", "/workspace"],
+      "timeout_seconds": 60,
+      "output_format": "sarif"
+    },
+    "mypy": {
+      "language": "python",
+      "argv": ["mypy", "--no-error-summary", "/workspace"],
+      "timeout_seconds": 180,
+      "output_format": "text"
+    }
+  },
+  "degradation": {
+    "on_docker_unavailable": "disable_tools_and_static_analysis",
+    "on_timeout": "abandon_that_tool_only",
+    "on_nonzero_exit": "keep_partial_output_and_log",
+    "note": "任何降级都必须写入 review_run.degraded_notes，不允许静默跳过（文档 P7）"
+  }
+}

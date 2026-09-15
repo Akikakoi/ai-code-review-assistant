@@ -1,0 +1,82 @@
+{
+  "findings": [
+    {
+      "path": "demo.py",
+      "line": 3,
+      "end_line": null,
+      "category": "maintainability",
+      "severity": "high",
+      "confidence": 0.8,
+      "score": 1.0,
+      "title": "[ruff] `json` imported but unused",
+      "body": "静态检查（ruff:F401）在本次变更行上命中：\n`json` imported but unused\n\n该结论由静态分析工具直接给出，未经模型判断，请结合上下文确认。",
+      "suggestion": null,
+      "evidence": [
+        "ruff:F401"
+      ],
+      "evidence_rule_ids": [
+        "F401"
+      ],
+      "needs_human_judgment": false,
+      "verify_verdict": null,
+      "merged_sources": 1,
+      "source": "static",
+      "tool": "ruff"
+    }
+  ],
+  "stats": {
+    "files_analyzed": 1,
+    "lines_changed": 4,
+    "context_level_max": 2,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_micros": 0,
+    "mode": "static_only",
+    "ai_available": true,
+    "degrade_notes": [
+      "静态检查原始命中 2 条，按变更行过滤后保留 1 条",
+      "静态检查未执行：semgrep:未安装、mypy:未安装",
+      "显式跳过模型分析（--no-llm），仅运行静态检查",
+      "降级模式下直接展示 1 条静态检查结论（未经模型判断）"
+    ],
+    "static_tools": [
+      "ruff"
+    ]
+  },
+  "dropped": [],
+  "job": {
+    "job_id": "8de91a3e-b3a5-4d60-ab4a-21367672456b",
+    "mode": "static_only",
+    "files_analyzed": 1,
+    "lines_changed": 4,
+    "chunks": 1,
+    "raw_candidates": 0,
+    "findings_kept": 1,
+    "findings_reported": 1,
+    "context_level_max": 2,
+    "dropped": 0,
+    "usage": {
+      "calls": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "cached_tokens": 0,
+      "cost_micros": 0,
+      "per_phase": {}
+    },
+    "degrade_notes": [
+      "静态检查原始命中 2 条，按变更行过滤后保留 1 条",
+      "静态检查未执行：semgrep:未安装、mypy:未安装",
+      "显式跳过模型分析（--no-llm），仅运行静态检查",
+      "降级模式下直接展示 1 条静态检查结论（未经模型判断）"
+    ],
+    "duration_ms": 418,
+    "run_id": 13,
+    "publish": null,
+    "error": null,
+    "verify_rejection_rate": 0.0,
+    "sources": {
+      "llm": 0,
+      "static": 1
+    }
+  }
+}

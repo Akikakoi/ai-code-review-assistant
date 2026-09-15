@@ -1,0 +1,91 @@
+# acra 本地依赖：PostgreSQL 16 + Redis 7
+#
+# 端口刻意避开本机已有服务：本机 MySQL 占用 3307，因此 PostgreSQL 用 5432、
+# Redis 用 6380，避免和本地已跑的 Redis（6379）冲突。
+#
+#   docker compose -f deploy/docker-compose.yml up -d
+#   docker compose -f deploy/docker-compose.yml down
+#
+# 启动后把这两行写进 .env：
+#   DATABASE_URL=postgresql://acra:acra@localhost:5432/acra
+#   REDIS_URL=redis://localhost:6380/0
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: acra-postgres
+    environment:
+      POSTGRES_USER: acra
+      POSTGRES_PASSWORD: acra
+      POSTGRES_DB: acra
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - acra-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U acra -d acra"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: acra-redis
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - acra-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # web 与 worker 分离部署（文档 §13.1）：web 无状态、只入队；worker 持沙箱能力
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: acra-web
+    profiles: ["full"]
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql://acra:acra@postgres:5432/acra
+      REDIS_URL: redis://redis:6379/0
+      ACRA_INLINE_WORKER: "false"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["acra", "serve", "--host", "0.0.0.0", "--port", "8000"]
+
+  worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: acra-worker
+    profiles: ["full"]
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql://acra:acra@postgres:5432/acra
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # worker 需要 Docker 能力才能拉起沙箱（文档 §12.2）
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["acra", "worker"]
+
+volumes:
+  acra-pgdata:
+  acra-redisdata:

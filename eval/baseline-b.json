@@ -1,0 +1,963 @@
+{
+  "metrics": {
+    "cases": 20,
+    "positives": 16,
+    "negatives": 4,
+    "true_positives": 7,
+    "false_positives": 0,
+    "false_negatives": 9,
+    "category_mismatches": 0,
+    "precision": 1.0,
+    "recall": 0.4375,
+    "false_positive_rate": 0.0,
+    "noise_rate": null,
+    "noise_rate_note": "需要评论是否被回复/修改/resolve 的平台数据",
+    "anchor_validity": 1.0,
+    "anchor_candidates": 14,
+    "anchor_dropped": 0,
+    "sample_adequate": false,
+    "avg_comments": 0.35,
+    "p95_latency_ms": 78464,
+    "reported_total": 7,
+    "verify_rejection_rate": 0.0,
+    "verify_rejection_in_range": false,
+    "failed_cases": 0,
+    "failed_case_ids": [],
+    "by_category": {
+      "bug": [
+        4,
+        0
+      ],
+      "security": [
+        3,
+        0
+      ]
+    },
+    "by_source": {
+      "decoy": [
+        2,
+        0,
+        2
+      ],
+      "injection": [
+        5,
+        0,
+        6
+      ],
+      "static_probe": [
+        0,
+        0,
+        1
+      ]
+    },
+    "decoy_protection": 0.5,
+    "by_category_precision": {
+      "bug": 1.0,
+      "security": 1.0
+    },
+    "top_false_positive_paths": [],
+    "missed_cases": [
+      "condition-inverted",
+      "decoy-always-true-loop",
+      "decoy-internal-collection-escaped",
+      "internal-collection-escaped-1",
+      "lock-scope-widened-2",
+      "resource-release-removed-1",
+      "static-sql-concat",
+      "swallowed-exception",
+      "unbounded-batch-write-2"
+    ],
+    "cost": {
+      "calls": 20,
+      "prompt_tokens": 27647,
+      "completion_tokens": 31910,
+      "cost_micros": 0,
+      "cost_per_case_micros": 0
+    },
+    "targets": {
+      "precision": {
+        "target": 0.6,
+        "met": true
+      },
+      "recall": {
+        "target": 0.35,
+        "met": true
+      },
+      "anchor_validity": {
+        "target": 0.98,
+        "met": true
+      },
+      "avg_comments": {
+        "target": 6.0,
+        "met": true
+      },
+      "p95_latency_ms": {
+        "target": 150000,
+        "met": true
+      }
+    },
+    "not_computable": {
+      "noise_rate": "需要评论是否被回复/修改/resolve 的平台数据",
+      "action_rate": "需要评论是否引发代码修改或讨论的平台数据"
+    }
+  },
+  "notes": [],
+  "cases": [
+    {
+      "case_id": "always-true-loop-2",
+      "expected": true,
+      "source": "injection",
+      "expected_lines": [
+        9
+      ],
+      "matched": [
+        [
+          "src/main/java/com/example/library/RetryServiceBravo.java",
+          9,
+          "bug"
+        ]
+      ],
+      "spurious": [],
+      "missed": [],
+      "category_mismatches": 0,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 48211,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1374,
+        "completion_tokens": 1243,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/library/RetryServiceBravo.java",
+          "line": 9,
+          "category": "bug",
+          "severity": "high",
+          "confidence": 0.9,
+          "verify_verdict": null,
+          "needs_human_judgment": false,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "case_id": "condition-inverted",
+      "expected": true,
+      "source": "injection",
+      "expected_lines": [
+        6
+      ],
+      "matched": [],
+      "spurious": [],
+      "missed": [
+        6
+      ],
+      "category_mismatches": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "raw_candidates": 0,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 45623,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1269,
+        "completion_tokens": 966,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [],
+      "candidate_pool": []
+    },
+    {
+      "case_id": "decoy-always-true-loop",
+      "expected": true,
+      "source": "decoy",
+      "expected_lines": [
+        10
+      ],
+      "matched": [],
+      "spurious": [],
+      "missed": [
+        10
+      ],
+      "category_mismatches": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 48722,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1458,
+        "completion_tokens": 1369,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [
+        {
+          "step": "8_threshold",
+          "reason": "confidence<0.65",
+          "verify_verdict": ""
+        }
+      ],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/library/RetryService.java",
+          "line": 10,
+          "category": "bug",
+          "severity": "high",
+          "confidence": 0.54,
+          "verify_verdict": null,
+          "needs_human_judgment": false,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 0.74
+        }
+      ]
+    },
+    {
+      "case_id": "decoy-internal-collection-escaped",
+      "expected": true,
+      "source": "decoy",
+      "expected_lines": [
+        12
+      ],
+      "matched": [],
+      "spurious": [],
+      "missed": [
+        12
+      ],
+      "category_mismatches": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 53748,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1388,
+        "completion_tokens": 1536,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [
+        {
+          "step": "8_threshold",
+          "reason": "confidence<0.65",
+          "verify_verdict": ""
+        }
+      ],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/library/CartService.java",
+          "line": 12,
+          "category": "bug",
+          "severity": "medium",
+          "confidence": 0.54,
+          "verify_verdict": null,
+          "needs_human_judgment": false,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 0.64
+        }
+      ]
+    },
+    {
+      "case_id": "decoy-null-check-removed",
+      "expected": true,
+      "source": "decoy",
+      "expected_lines": [
+        7
+      ],
+      "matched": [
+        [
+          "src/main/java/com/example/library/ProfileView.java",
+          5,
+          "security"
+        ]
+      ],
+      "spurious": [],
+      "missed": [],
+      "category_mismatches": 0,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 74924,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1422,
+        "completion_tokens": 2253,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/library/ProfileView.java",
+          "line": 5,
+          "category": "security",
+          "severity": "medium",
+          "confidence": 0.9,
+          "verify_verdict": null,
+          "needs_human_judgment": true,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 0.85
+        }
+      ]
+    },
+    {
+      "case_id": "decoy-sensitive-data-logged",
+      "expected": true,
+      "source": "decoy",
+      "expected_lines": [
+        9
+      ],
+      "matched": [
+        [
+          "src/main/java/com/example/library/AuthService.java",
+          9,
+          "security"
+        ]
+      ],
+      "spurious": [],
+      "missed": [],
+      "category_mismatches": 0,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 54948,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1436,
+        "completion_tokens": 1705,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/library/AuthService.java",
+          "line": 9,
+          "category": "security",
+          "severity": "high",
+          "confidence": 0.9,
+          "verify_verdict": null,
+          "needs_human_judgment": false,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "case_id": "internal-collection-escaped-1",
+      "expected": true,
+      "source": "injection",
+      "expected_lines": [
+        11
+      ],
+      "matched": [],
+      "spurious": [],
+      "missed": [
+        11
+      ],
+      "category_mismatches": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 51738,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1295,
+        "completion_tokens": 1552,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [
+        {
+          "step": "8_threshold",
+          "reason": "confidence<0.65",
+          "verify_verdict": ""
+        }
+      ],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/library/CartServiceAlpha.java",
+          "line": 11,
+          "category": "bug",
+          "severity": "high",
+          "confidence": 0.54,
+          "verify_verdict": null,
+          "needs_human_judgment": true,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 0.59
+        }
+      ]
+    },
+    {
+      "case_id": "lock-scope-widened-2",
+      "expected": true,
+      "source": "injection",
+      "expected_lines": [
+        7
+      ],
+      "matched": [],
+      "spurious": [],
+      "missed": [
+        7
+      ],
+      "category_mismatches": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "raw_candidates": 0,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 42689,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1514,
+        "completion_tokens": 1090,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [],
+      "candidate_pool": []
+    },
+    {
+      "case_id": "missing-return-branch-1",
+      "expected": true,
+      "source": "injection",
+      "expected_lines": [
+        12
+      ],
+      "matched": [
+        [
+          "src/main/java/com/example/library/StatusMapperAlpha.java",
+          12,
+          "bug"
+        ]
+      ],
+      "spurious": [],
+      "missed": [],
+      "category_mismatches": 0,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 55232,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1343,
+        "completion_tokens": 1803,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/library/StatusMapperAlpha.java",
+          "line": 12,
+          "category": "bug",
+          "severity": "medium",
+          "confidence": 0.7,
+          "verify_verdict": null,
+          "needs_human_judgment": true,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 0.65
+        }
+      ]
+    },
+    {
+      "case_id": "negative-check-then-act",
+      "expected": false,
+      "source": "injection",
+      "expected_lines": [],
+      "matched": [],
+      "spurious": [],
+      "missed": [],
+      "category_mismatches": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "raw_candidates": 0,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 54769,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1357,
+        "completion_tokens": 1548,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [],
+      "candidate_pool": []
+    },
+    {
+      "case_id": "negative-internal-collection-escaped",
+      "expected": false,
+      "source": "injection",
+      "expected_lines": [],
+      "matched": [],
+      "spurious": [],
+      "missed": [],
+      "category_mismatches": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "raw_candidates": 0,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 78078,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1312,
+        "completion_tokens": 2875,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [],
+      "candidate_pool": []
+    },
+    {
+      "case_id": "negative-sql-injection",
+      "expected": false,
+      "source": "injection",
+      "expected_lines": [],
+      "matched": [],
+      "spurious": [],
+      "missed": [],
+      "category_mismatches": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "raw_candidates": 0,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 67261,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1327,
+        "completion_tokens": 1742,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [],
+      "candidate_pool": []
+    },
+    {
+      "case_id": "negative-unbounded-batch-write",
+      "expected": false,
+      "source": "injection",
+      "expected_lines": [],
+      "matched": [],
+      "spurious": [],
+      "missed": [],
+      "category_mismatches": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "raw_candidates": 0,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 36270,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1438,
+        "completion_tokens": 899,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [],
+      "candidate_pool": []
+    },
+    {
+      "case_id": "null-check-inverted",
+      "expected": true,
+      "source": "injection",
+      "expected_lines": [
+        6
+      ],
+      "matched": [
+        [
+          "src/main/java/com/example/library/PaymentService.java",
+          6,
+          "bug"
+        ]
+      ],
+      "spurious": [],
+      "missed": [],
+      "category_mismatches": 0,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 48597,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1330,
+        "completion_tokens": 1466,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/library/PaymentService.java",
+          "line": 6,
+          "category": "bug",
+          "severity": "high",
+          "confidence": 1.0,
+          "verify_verdict": null,
+          "needs_human_judgment": false,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "case_id": "resource-release-removed-1",
+      "expected": true,
+      "source": "injection",
+      "expected_lines": [
+        9
+      ],
+      "matched": [],
+      "spurious": [],
+      "missed": [
+        9
+      ],
+      "category_mismatches": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 39743,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1384,
+        "completion_tokens": 1211,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [
+        {
+          "step": "8_threshold",
+          "reason": "confidence<0.65",
+          "verify_verdict": ""
+        }
+      ],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/library/FileExportServiceAlpha.java",
+          "line": 9,
+          "category": "bug",
+          "severity": "high",
+          "confidence": 0.57,
+          "verify_verdict": null,
+          "needs_human_judgment": false,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 0.77
+        }
+      ]
+    },
+    {
+      "case_id": "sql-injection",
+      "expected": true,
+      "source": "injection",
+      "expected_lines": [
+        10
+      ],
+      "matched": [
+        [
+          "src/main/java/com/example/library/OrderRepository.java",
+          10,
+          "security"
+        ]
+      ],
+      "spurious": [],
+      "missed": [],
+      "category_mismatches": 0,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 33441,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1363,
+        "completion_tokens": 964,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/library/OrderRepository.java",
+          "line": 10,
+          "category": "security",
+          "severity": "blocker",
+          "confidence": 0.95,
+          "verify_verdict": null,
+          "needs_human_judgment": false,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "case_id": "static-sql-concat",
+      "expected": true,
+      "source": "static_probe",
+      "expected_lines": [
+        18
+      ],
+      "matched": [],
+      "spurious": [],
+      "missed": [
+        18
+      ],
+      "category_mismatches": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 41457,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1563,
+        "completion_tokens": 1431,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [
+        {
+          "step": "8_threshold",
+          "reason": "confidence<0.65",
+          "verify_verdict": ""
+        }
+      ],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/staticprobe/LegacyOrderDao.java",
+          "line": 18,
+          "category": "security",
+          "severity": "blocker",
+          "confidence": 0.475,
+          "verify_verdict": null,
+          "needs_human_judgment": false,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 0.775
+        }
+      ]
+    },
+    {
+      "case_id": "swallowed-exception",
+      "expected": true,
+      "source": "injection",
+      "expected_lines": [
+        9
+      ],
+      "matched": [],
+      "spurious": [],
+      "missed": [
+        9
+      ],
+      "category_mismatches": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 65298,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1320,
+        "completion_tokens": 1632,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [
+        {
+          "step": "8_threshold",
+          "reason": "confidence<0.65",
+          "verify_verdict": ""
+        }
+      ],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/library/SyncService.java",
+          "line": 9,
+          "category": "bug",
+          "severity": "high",
+          "confidence": 0.48,
+          "verify_verdict": null,
+          "needs_human_judgment": true,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 0.53
+        }
+      ]
+    },
+    {
+      "case_id": "swallowed-exception-2",
+      "expected": true,
+      "source": "injection",
+      "expected_lines": [
+        9
+      ],
+      "matched": [
+        [
+          "src/main/java/com/example/library/SyncServiceBravo.java",
+          9,
+          "bug"
+        ]
+      ],
+      "spurious": [],
+      "missed": [],
+      "category_mismatches": 0,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 55075,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1330,
+        "completion_tokens": 1676,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/library/SyncServiceBravo.java",
+          "line": 9,
+          "category": "bug",
+          "severity": "high",
+          "confidence": 0.8,
+          "verify_verdict": null,
+          "needs_human_judgment": true,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 0.85
+        }
+      ]
+    },
+    {
+      "case_id": "unbounded-batch-write-2",
+      "expected": true,
+      "source": "injection",
+      "expected_lines": [
+        12
+      ],
+      "matched": [],
+      "spurious": [],
+      "missed": [
+        12
+      ],
+      "category_mismatches": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "raw_candidates": 1,
+      "anchor_dropped": 0,
+      "verify_enabled": false,
+      "verify_rejection_rate": 0.0,
+      "duration_ms": 85789,
+      "usage": {
+        "calls": 1,
+        "prompt_tokens": 1424,
+        "completion_tokens": 2949,
+        "cost_micros": 0
+      },
+      "error": null,
+      "dropped": [
+        {
+          "step": "8_threshold",
+          "reason": "confidence<0.65",
+          "verify_verdict": ""
+        }
+      ],
+      "candidate_pool": [
+        {
+          "path": "src/main/java/com/example/library/BatchWriterBravo.java",
+          "line": 12,
+          "category": "performance",
+          "severity": "medium",
+          "confidence": 0.42,
+          "verify_verdict": null,
+          "needs_human_judgment": true,
+          "evidence_rule_ids": [],
+          "source": "llm",
+          "score": 0.37
+        }
+      ]
+    }
+  ]
+}

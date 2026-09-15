@@ -1,0 +1,38 @@
+# ---- secrets / local env ----
+.env
+*.pem
+*.key
+
+# ---- python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# ---- 示例仓库 ----
+# 由 examples/build_demo_repo.py / build_static_demo.py 生成，本身是含 .git 的仓库。
+# 不忽略的话 git 会把它们记成 gitlink（伪 submodule），而内容随时可再生产；
+# 因而 CI 里的门禁自检改为自己构造临时仓库，不依赖这两个目录是否被提交。
+examples/demo-repo/
+examples/static-demo/
+
+# ---- runtime ----
+.acra-work/
+*.db
+*.sqlite3
+logs/
+eval/report*.json
+findings*.json
+findings*.sarif
+
+# ---- editor / os ----
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Finding",
+  "type": "object",
+  "required": ["path", "line", "category", "severity", "confidence", "title", "body"],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "仓库相对路径，必须与输入中提供的路径完全一致"
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "新文件中的行号，必须落在本次 diff 的新增行范围内"
+    },
+    "end_line": { "type": ["integer", "null"] },
+    "category": {
+      "type": "string",
+      "enum": ["bug", "security", "concurrency", "performance", "maintainability", "test", "style"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["blocker", "high", "medium", "low", "nit"]
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "title": { "type": "string", "maxLength": 80, "minLength": 2 },
+    "body": {
+      "type": "string",
+      "maxLength": 600,
+      "minLength": 10,
+      "description": "必须包含：现象 → 触发条件 → 影响 → 修复建议"
+    },
+    "suggestion": { "type": ["string", "null"], "maxLength": 800 },
+    "evidence": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "支撑该结论的具体代码片段或静态规则 ID，禁止空泛表述"
+    },
+    "needs_human_judgment": {
+      "type": "boolean",
+      "description": "是否属于需要作者结合业务判断的问题（这类会降低排序权重）"
+    }
+  }
+}
