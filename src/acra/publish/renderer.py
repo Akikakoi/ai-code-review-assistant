@@ -42,6 +42,12 @@ SOURCE_LABEL = {
 
 FOOTER = "<sub>由 acra 生成 · 回复 `/acra ignore` 可跳过本 PR 后续审查</sub>"
 
+#: 机器可读的标识：渲染后不可见，用来判断"这条 review 是不是本工具发的"。
+#:
+#: **必须同时出现在 summary 与行级评论里。** `GithubPublisher.existing_review_for_head`
+#: 靠它做幂等 —— 如果只有 `FOOTER` 里那句人类可见的中文（"由 acra 生成"），
+#: 那么改一次文案就会让幂等**静默失效**，同一 head_sha 每次重跑都再发一条 review。
+#: 实测确认过：E2E 里 summary 从未包含过这个标记，幂等当时是靠中文那半撑着的。
 BOT_MARKER = "<!-- acra:review -->"
 
 
@@ -130,7 +136,7 @@ def render_summary(
                 lines.append(f"- `{f.path}:{f.line}` {f.title}")
             lines += ["", "</details>"]
 
-    lines += ["", _scope_block(inputs), "", FOOTER]
+    lines += ["", _scope_block(inputs), "", FOOTER, BOT_MARKER]
     return "\n".join(lines)
 
 

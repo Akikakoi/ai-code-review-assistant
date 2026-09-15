@@ -744,7 +744,9 @@ async def _publish(publisher, job: ReviewJob, outcome: ReviewOutcome) -> dict[st
         )
         result["check_run_id"] = check.get("id")
     except AcraError as exc:
-        result["check_run_error"] = f"{type(exc).__name__}"
+        # 把消息也带上：只记异常类型时，403（细粒度 PAT 建不了 Check Run）
+        # 与 5xx（平台抖动）在排查时长得一模一样。
+        result["check_run_error"] = f"{type(exc).__name__}: {exc}"
     return result
 
 

@@ -248,6 +248,33 @@ def test_summary_for_no_findings() -> None:
     assert "未发现值得修改的问题" in text
 
 
+def test_summary_carries_the_machine_marker_with_findings() -> None:
+    text = render_summary([_finding()], SummaryInputs(files_analyzed=1, lines_changed=3))
+    assert BOT_MARKER in text
+
+
+def test_summary_carries_the_machine_marker_without_findings() -> None:
+    text = render_summary([], SummaryInputs(files_analyzed=1, lines_changed=3))
+    assert BOT_MARKER in text
+
+
+def test_summary_is_recognised_by_the_product_own_idempotency_predicate() -> None:
+    """把 summary 交给产品自己的判据，确认它认得出这是自己发的。
+
+    这个测试守的是一个很隐蔽的耦合：幂等（`existing_review_for_head`）用的标记
+    必须真的出现在 summary 里。实测发现 summary 从来只有 FOOTER 里那句中文
+    "由 acra 生成"、没有 HTML 标记 —— 于是**改一次文案就会让幂等静默失效**，
+    同一 head_sha 每次重跑都再发一条 review。两者分居两个文件，必须钉在一起。
+    """
+    from acra.publish.github import BOT_REVIEW_MARKERS
+
+    for findings in ([], [_finding()]):
+        text = render_summary(findings, SummaryInputs(files_analyzed=1, lines_changed=3))
+        assert any(marker in text for marker in BOT_REVIEW_MARKERS), (
+            "summary 不含任何幂等标记，重复发布会被当成首次发布"
+        )
+
+
 def test_comment_body_includes_suggestion_and_evidence() -> None:
     body = render_comment_body(_finding(suggestion="jdbc.query(sql, args)"))
     assert "**严重度：高**" in body
