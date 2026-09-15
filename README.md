@@ -128,7 +128,7 @@ acra serve --host 0.0.0.0 --port 8000
 
 | 方式 | 身份 | 生命周期 | 能建 Check Run | 适合 |
 | --- | --- | --- | --- | --- |
-| 细粒度 PAT | 你本人 | 手动设，最长 1 年 | ✅（需 `Checks: write`） | 本地 E2E、快速验证 |
+| 细粒度 PAT | 你本人 | 手动设，最长 1 年 | ❌ **实测 403** | 本地 E2E、快速验证 |
 | Classic PAT（`repo`） | 你本人 | 可设永久 | ❌ **只能读，不能建** | 只发评论的场景 |
 | GitHub App | `<app>[bot]` | installation token 1 小时，自动续 | ✅ | 生产 |
 | Actions 的 `GITHUB_TOKEN` | `github-actions[bot]` | 单次 job | ✅（需 `checks: write`） | 在 CI 里自审 |
@@ -136,14 +136,21 @@ acra serve --host 0.0.0.0 --port 8000
 配置项：App 用 `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY_PATH` / `GITHUB_APP_INSTALLATION_ID`；
 PAT 与 Actions token 都用 `ACRA_GITHUB_TOKEN`（`acra doctor` 会显示来源为 `static_token`）。
 
-**Check Run 是个例外项，值得单独记住**：GitHub 的文档写着 checks 的写权限
-"only available to GitHub Apps"，而同一页的 fine-grained token 小节又列出了
-细粒度 PAT 需要 `Checks: write` —— 两处措辞不一致。因此：
+**Check Run 是个例外项，值得单独记住**：GitHub 的文档在两处自相矛盾 ——
+checks 的写权限写着 "only available to GitHub Apps"，而同一页的 fine-grained token
+小节又列出细粒度 PAT 需要 `Checks: write`。
 
-- **Classic PAT / OAuth 用户 token 明确不能创建 Check Run**（这是文档里没有歧义的那部分）；
-- 细粒度 PAT 与 Actions token 按文档是支持的，但**属于该实测一次的事**；
-- 代码对此已经容错：`_publish` 把 Check Run 调用单独包在 `try/except` 里，
-  失败只记 `check_run_error`，**不会连带丢掉 review 评论**。
+**实测为准**（细粒度 PAT，权限已含 `Checks: Read and write`）：
+
+```
+POST /repos/{owner}/{repo}/check-runs -> 403
+{"message":"Resource not accessible by personal access token"}
+```
+
+所以：**Check Run 只能由 GitHub App（或其 installation token，含 Actions 的 `GITHUB_TOKEN`）创建。**
+用 PAT 时 review 评论照常发布，Check Run 必然失败 —— 代码对此已容错
+（`_publish` 单独 `try/except`，失败只记 `check_run_error`，不连带丢掉评论），
+所以最坏结果是"评论发了、Check Run 没有"，而且这个失败是显式的。
 
 仓库级 Webhook 与 App Webhook 都能投递事件、都用 `X-Hub-Signature-256` 验签，
 所以第 5 项（Webhook）**不必先有 App**：`Settings → Webhooks` 配一个仓库级 webhook 即可。
@@ -573,6 +580,16 @@ MiMo 的思考 token 计入 `max_completion_tokens`。预算给小了会出现
 ./.venv/Scripts/python.exe scripts/run_checks.py   # ruff + pytest（写 .acra-work/checks_result.txt）
 ./.venv/Scripts/python.exe scripts/e2e_gate.py     # 门禁退出码（写 .acra-work/e2e_gate.txt）
 ```
+
+还有一条**不在 CI 里跑**的验证 —— 它会真实建 PR、发评论、关 PR，需要发布凭据：
+
+```bash
+./.venv/Scripts/python.exe scripts/e2e_publish.py --branch <已推送的测试分支>
+# 断言全部从平台侧回读：PR 上是否真的有本工具发的 review、评论数是否一致、重复发布是否幂等
+```
+
+首次跑通它找出了三个离线测试结构上覆盖不到的问题（Check Run 的权限边界、
+summary 缺幂等标记、交叉验证误判真结论），见 [`docs/adr/0014`](docs/adr/0014-first-real-publish-e2e.md)。
 
 ### 门禁退出码契约是被真实进程验证过的
 
