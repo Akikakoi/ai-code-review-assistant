@@ -343,6 +343,23 @@ def _value_differs_from_default(current, default) -> bool:
     return True
 
 
+#: 名字里带这些词的 `ACRA_*` 项，值一律打码。
+#:
+#: doctor 的目的是"让被覆盖这件事可见"，但**凭据的值本身不该出现在终端、
+#: 日志或 CI 输出里**。实测踩过：把 `ACRA_GITHUB_TOKEN` 写进 `.env` 之后，
+#: doctor 直接把整串 token 打印了出来 —— 连一次失败测试的 diff 里都带出了它。
+#: 需要判断"配没配、配的是哪一个"，长度就够了。
+_SENSITIVE_KEY_HINTS = ("token", "secret", "password", "key", "credential")
+
+MASKED = "***"
+
+
+def _display_value(key: str, value: str) -> str:
+    if any(hint in key.lower() for hint in _SENSITIVE_KEY_HINTS):
+        return f"{MASKED}（已打码，长度 {len(value)}）"
+    return value
+
+
 def overridden_acra_settings(settings) -> list[tuple[str, str]]:
     """列出与**代码声明默认值**不同的 `ACRA_*` 项（字段名 → 生效值）。
 
@@ -355,6 +372,7 @@ def overridden_acra_settings(settings) -> list[tuple[str, str]]:
     （实测踩到过：`ACRA_MAX_COMMENTS=9` 明明生效了，doctor 却报"无覆盖"）。
 
     只比较 `acra_*` 字段：`LLM_*` / `DATABASE_URL` 这类本来就该在 .env 里配，报了是噪音。
+    凭据类的值会被打码（见 `_display_value`）——**可见的是"谁盖的"，不是"值是什么"**。
     """
     from pydantic_core import PydanticUndefined
 
@@ -369,7 +387,7 @@ def overridden_acra_settings(settings) -> list[tuple[str, str]]:
         if default is PydanticUndefined:
             continue
         if _value_differs_from_default(current.get(key), default):
-            out.append((key, str(current.get(key))))
+            out.append((key, _display_value(key, str(current.get(key)))))
     return out
 
 

@@ -94,11 +94,33 @@ def test_no_overrides_reported_when_clean(monkeypatch) -> None:
 
     特别是 `acra_workdir`：它的校验器会把相对默认值 `.acra-work` 绝对化，
     直接比较会把它报成"被覆盖"。诊断输出里混进这种噪音，看的人很快就学会忽略整行。
+
+    必须同时关掉 `.env`：只 `delenv` 只清环境变量，`.env` 文件照读 ——
+    实测踩过：`.env` 里加了一行 `ACRA_GITHUB_TOKEN`，这条测试就红了。
     """
     for field in Settings.model_fields:
         if field.startswith("acra_"):
             monkeypatch.delenv(field.upper(), raising=False)
-    assert overridden_acra_settings(Settings()) == []
+    assert overridden_acra_settings(Settings(_env_file=None)) == []
+
+
+def test_credential_values_are_masked_in_doctor_output(monkeypatch) -> None:
+    """doctor 要报"谁盖了默认值"，但**不能把凭据的值打出来**。
+
+    实测踩过：把 `ACRA_GITHUB_TOKEN` 写进 `.env` 后，`acra doctor` 直接打印了整串
+    token，连一次失败测试的 diff 里都带出了它 —— 终端、日志、CI 输出都是泄露面。
+    """
+    from acra.cli import MASKED
+
+    secret = "github_pat_11AAAAA_zzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+    monkeypatch.setenv("ACRA_GITHUB_TOKEN", secret)
+    overrides = dict(overridden_acra_settings(Settings(_env_file=None)))
+
+    value = overrides.get("acra_github_token")
+    assert value is not None, "被覆盖了却没报出来，等于把这一项藏了"
+    assert secret not in value
+    assert MASKED in value
+    assert str(len(secret)) in value, "长度要留着，否则无法判断配的是哪一个"
 
 
 def test_path_normalization_is_not_reported_as_override(monkeypatch) -> None:
