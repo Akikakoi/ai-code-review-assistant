@@ -310,6 +310,11 @@ class FileContext:
     static_findings: list[StaticFinding] = field(default_factory=list)
     token_estimate: int = 0
     degraded: list[str] = field(default_factory=list)
+    #: L3 的**信息性**说明（走的是哪条策略、能力边界在哪）。
+    #: 与 `degraded` 分开存放是刻意的：`degraded` 里的每一条都会把整次运行标记成
+    #: degraded，而"L3 用符号匹配而非向量"是设计事实，不是本次分析出了问题。
+    #: 混在一起会让故障率指标变成噪音，也会让真正的降级被淹没。
+    l3_notes: list[str] = field(default_factory=list)
     source_lines: list[str] = field(default_factory=list)
 
     # 已按 token 预算装配完毕、可直接注入提示词的文本块（由 context_builder 填充）

@@ -153,6 +153,7 @@ def _pack_chunk_context(
         static_findings=ctx.static_findings,
         source_lines=ctx.source_lines,
         degraded=degraded,
+        l3_notes=list(ctx.l3_notes),
     )
     chunk_ctx.enclosing_source_text = packed.get("l2")
     chunk_ctx.static_text = packed.get("static")

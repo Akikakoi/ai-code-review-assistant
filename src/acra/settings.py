@@ -95,6 +95,16 @@ class Settings(BaseSettings):
     #: 仓库文件数超过该值就不建文件索引（避免超大仓库上多花一次 ls-tree）
     acra_l2_max_repo_files: int = 20_000
 
+    # ---------------- 阶段三：L3 ----------------
+    #: L3 反向引用/相似实现的扫描配额（候选文件数上限）。
+    #: 线索是增强项，不能让它把一次审查拖成全仓扫描 —— 配额用尽会写进降级说明，
+    #: 因为那意味着"线索可能不完整"，与"扫描完了确实没有"是两件事。
+    acra_l3_max_scan_files: int = 400
+    #: 注入提示词的调用方上限
+    acra_l3_max_callers: int = 8
+    #: 注入提示词的相似实现上限（ADR 0006 的 top-3）
+    acra_l3_max_similar: int = 3
+
     #: 静态分析总开关。默认开启；工具没装或没配置规则集时逐项跳过并写进降级说明，
     #: 不会因为环境缺工具而让整条链路失败。
     acra_static_analysis_enabled: bool = True

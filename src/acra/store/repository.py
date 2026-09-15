@@ -7,13 +7,14 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from acra.models import Finding
+from acra.models import Finding, PriorComment
 from acra.store.models import FindingRow, RepoConfig, Repository, ReviewRun, ToolCall
 
 
@@ -286,6 +287,40 @@ def last_merge_base(session: Session, repository_id: int, pr_number: int) -> str
         .limit(1)
     )
     return session.scalar(stmt)
+
+
+def prior_comments_by_path(
+    session: Session,
+    repository_id: int,
+    paths: Iterable[str],
+    *,
+    limit_per_path: int = 5,
+) -> dict[str, list[PriorComment]]:
+    """该仓库对这些路径的历史审查结论，按路径分组（§7.1 的 L3 历史线索）。
+
+    用途是让模型"不要重复提出"已经提过的问题 —— 但那要靠上下文拿到历史结论才行，
+    在此之前这条线索从未被注入过（函数不存在，pipeline 也不知道该从哪取）。
+    这里只取**本仓库**的结论：同一个路径在别的仓库里指的不是同一份代码。
+    """
+    wanted = [p for p in dict.fromkeys(paths) if p]
+    if not wanted:
+        return {}
+
+    stmt = (
+        select(FindingRow.path, FindingRow.line, FindingRow.title, FindingRow.body)
+        .join(ReviewRun, ReviewRun.id == FindingRow.review_run_id)
+        .where(ReviewRun.repository_id == repository_id, FindingRow.path.in_(wanted))
+        .order_by(FindingRow.created_at.desc(), FindingRow.id.desc())
+    )
+    out: dict[str, list[PriorComment]] = {}
+    for path, line, title, body in session.execute(stmt).all():
+        bucket = out.setdefault(path, [])
+        if len(bucket) >= limit_per_path:
+            continue
+        bucket.append(
+            PriorComment(path=path, line=int(line), body=f"{title}：{body}"[:400])
+        )
+    return out
 
 
 def daily_cost_micros(session: Session) -> int:

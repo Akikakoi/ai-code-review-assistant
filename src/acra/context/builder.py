@@ -15,6 +15,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from acra.context.budget import DEFAULT_SHARES, Section, TokenBudget
+from acra.context.retriever import Retriever
 from acra.models import (
     CallSite,
     CodeSlice,
@@ -257,8 +258,14 @@ class ContextBuilder:
         static_findings: list[StaticFinding] | None = None,
         prior_comments: list[PriorComment] | None = None,
         allow_l3: bool = False,
+        retriever: Retriever | None = None,
     ) -> FileContext:
         level = level or min(self.settings.acra_context_level_max, 3)
+        # §7.2：触发条件命中就把该文件升到 L3。"默认关闭"的含义是**不命中就不开**，
+        # 不是"命中了也不开" —— 之前 level 停在 2，于是 L3 那一段永远进不去，
+        # 触发条件算出来了也没用。
+        if allow_l3:
+            level = max(level, 3)
         focus = set(focus_lines) if focus_lines else set(file_diff.added_line_numbers)
         degraded: list[str] = []
 
@@ -292,12 +299,29 @@ class ContextBuilder:
             if not referenced_types and not self._file_index:
                 degraded.append("l2_no_repo_file_index")
 
-        # ---- L3（阶段一默认关闭）----
+        # ---- L3：按需触发（§7.1 默认关闭；`allow_l3` 由 §7.2 的触发条件决定）----
         callers: list[CallSite] = []
         similar: list[CodeSlice] = []
+        l3_notes: list[str] = []
         priors = list(prior_comments or [])
+        # 三类 L3 线索一起受 `allow_l3` 管：不到 L3 就不该有任何一类出现在上下文里。
+        # 原先这里只有一句 `priors = [] if level < 3 else priors` —— 它是个 no-op，
+        # 于是 `allow_l3=False` 时历史评论照样会被注进去。
         if not allow_l3:
-            priors = [] if level < 3 else priors
+            priors = []
+        else:
+            if retriever is not None:
+                clues = retriever.clues(file_diff, spans)
+                callers = clues.callers
+                similar = clues.similar
+                l3_notes = list(clues.notes)
+                if clues.truncated:
+                    # 线索可能不完整 —— 这条是**降级**（与 notes 不同）
+                    degraded.append(
+                        f"l3_partial:候选文件按配额截断为 {retriever.max_scan_files}"
+                    )
+            else:
+                l3_notes.append("L3 触发但未提供检索器，本次无 L3 线索")
 
         # ---- 预算装配 ----
         context_lines = self.settings.acra_context_context_lines
@@ -347,6 +371,7 @@ class ContextBuilder:
             static_findings=list(static_findings or []),
             source_lines=lines,
             degraded=degraded,
+            l3_notes=l3_notes,
         )
         ctx.enclosing_source_text = packed.get("l2")
         ctx.static_text = packed.get("static")

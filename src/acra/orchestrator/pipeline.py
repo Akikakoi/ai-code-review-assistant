@@ -39,6 +39,7 @@ from acra.analysis.static_runner import run_static_analysis
 from acra.analysis.static_runner import to_findings as to_static_findings
 from acra.context.builder import ContextBuilder
 from acra.context.chunker import chunk_file
+from acra.context.retriever import Retriever
 from acra.engine.llm_client import LLMClient, Usage
 from acra.engine.merge import merge_candidates
 from acra.engine.prompt_loader import repo_content_block
@@ -50,6 +51,7 @@ from acra.models import (
     DiffSet,
     DropRecord,
     Finding,
+    PriorComment,
     RawFinding,
     ReviewContext,
     ReviewJob,
@@ -312,12 +314,28 @@ async def run_review(
         outcome.degrade.add("静态检查超时：" + "、".join(static_report.timed_out))
 
     # ---- 5. 上下文与分块 ----
-    chunks, context_notes = await asyncio.to_thread(
-        _build_chunks, handle, diff_set, settings, static_findings, opts
+    priors_by_path = _load_prior_comments(db, job, diff_set, opts, settings)
+    chunks, context_notes, context_info = await asyncio.to_thread(
+        _build_chunks,
+        handle,
+        diff_set,
+        settings,
+        static_findings,
+        opts,
+        priors_by_path=priors_by_path,
     )
     for note in context_notes:
         outcome.degrade.add(note)
+    # L3 的策略与能力边界走信息性通道：它不该把一次正常审查标记成 degraded
+    for note in context_info:
+        outcome.degrade.add(note, degraded=False)
     outcome.chunks = len(chunks)
+    # 逐文件按 §7.2 升级后，实际用到的最高层级可能高于配置上限 —— 如实上报，
+    # 否则 summary 里会写着"L1 + L2"而实际上 L3 线索已经注进去了。
+    if chunks:
+        outcome.context_level_max = max(
+            outcome.context_level_max, max(c.context.level for c in chunks)
+        )
 
     # ---- 6. 全局预算 ----
     from acra.context.budget import RunBudget
@@ -539,27 +557,60 @@ def _prepare_diff(handle, job: ReviewJob, settings, db, opts: ReviewOptions):
     return guard.diff_set, mode, notes, info
 
 
+def _load_prior_comments(
+    db, job: ReviewJob, diff_set: DiffSet, opts: ReviewOptions, settings
+) -> dict[str, list[PriorComment]]:
+    """该仓库对这些文件的历史审查结论（§7.1「历史评论，用于避免重复提」）。
+
+    只在可能用到 L3 时才查：L3 默认关闭，默认路径上不该多一次查询。
+    """
+    max_level = opts.level or min(settings.acra_context_level_max, 3)
+    if db is None or max_level < 3:
+        return {}
+    try:
+        from acra.store.repository import prior_comments_by_path
+
+        with db.session() as session:
+            repo_id = _resolve_repository(session, job)
+            return prior_comments_by_path(
+                session, repo_id, [f.path for f in diff_set.files]
+            )
+    except Exception as exc:  # noqa: BLE001 - 线索是增强项，读不到就当没有
+        logger.debug("读取历史评论失败（本次无 L3 历史线索）：%s", exc)
+        return {}
+
+
 def _build_chunks(
     handle,
     diff_set: DiffSet,
     settings,
     static_findings: list[StaticFinding],
     opts: ReviewOptions,
-) -> tuple[list[Chunk], list[str]]:
-    notes: list[str] = []
-    symbol_index = SymbolIndex()
+    *,
+    priors_by_path: dict[str, list[PriorComment]] | None = None,
+) -> tuple[list[Chunk], list[str], list[str]]:
+    """返回 `(chunks, 降级说明, 信息性说明)`。
 
-    # 符号索引需要一份仓库文件清单来把 import 解析成定义文件路径（文档 §7.5）。
-    # 清单本身只取一次；超大仓库直接放弃索引，避免为了 L2 多花一次全量 ls-tree。
+    两个说明列表必须分开：降级说明会把整次运行标记成 degraded，
+    而"L3 走了符号匹配""静态检查未执行"这类是**事实陈述**，不是本次分析出了问题。
+    """
+    notes: list[str] = []
+    info: list[str] = []
+    symbol_index = SymbolIndex()
+    max_level = opts.level or min(settings.acra_context_level_max, 3)
+
+    # 符号索引需要一份仓库文件清单来把 import 解析成定义文件路径（文档 §7.5），
+    # L3 的候选文件也来自它。清单本身只取一次；超大仓库直接放弃，避免多花一次全量 ls-tree。
     repo_files: list[str] = []
-    if settings.acra_l2_type_signatures:
+    if settings.acra_l2_type_signatures or max_level >= 3:
         try:
             repo_files = handle.list_files(diff_set.head_sha)
         except Exception as exc:  # noqa: BLE001 - 索引是增强项，失败不影响 L1/L2 主路径
-            notes.append(f"仓库文件清单获取失败，已跳过类型签名：{type(exc).__name__}")
+            notes.append(f"仓库文件清单获取失败，已跳过类型签名与 L3 候选：{type(exc).__name__}")
         if repo_files and len(repo_files) > settings.acra_l2_max_repo_files:
             notes.append(
-                f"仓库文件数 {len(repo_files)} 超过 {settings.acra_l2_max_repo_files}，已跳过类型签名索引"
+                f"仓库文件数 {len(repo_files)} 超过 {settings.acra_l2_max_repo_files}，"
+                "已跳过类型签名索引与 L3 候选"
             )
             repo_files = []
 
@@ -570,6 +621,12 @@ def _build_chunks(
         symbol_index=symbol_index,
         repo_files=repo_files,
     )
+    retriever = (
+        Retriever(handle, settings, head_sha=diff_set.head_sha, repo_files=repo_files)
+        if repo_files
+        else None
+    )
+    priors_by_path = priors_by_path or {}
     chunks: list[Chunk] = []
 
     files = sorted(
@@ -587,7 +644,10 @@ def _build_chunks(
                 static_findings=[
                     sf for sf in static_findings if sf.path == file_diff.path
                 ],
+                # 历史评论与反向引用/相似实现同属 L3：不到 L3 就不该注进去
+                prior_comments=priors_by_path.get(file_diff.path),
                 allow_l3=bool(risk_rules.l3_triggers(file_diff)),
+                retriever=retriever,
             )
         except Exception as exc:  # noqa: BLE001 - 单文件上下文失败不应终止整次审查
             failed += 1
@@ -600,6 +660,8 @@ def _build_chunks(
             continue
         for note in ctx.degraded:
             notes.append(f"{file_diff.path}: {note}")
+        for note in ctx.l3_notes:
+            info.append(f"{file_diff.path}: {note}")
         chunks.extend(chunk_file(file_diff, ctx, settings))
 
     # 全量失败必须显式报出来。否则一次系统性的上下文构建故障会表现成"这次没什么问题"，
@@ -607,12 +669,16 @@ def _build_chunks(
     if attempted and failed == attempted:
         notes.append(f"全部 {attempted} 个文件的上下文构建均失败，本次无有效分析范围")
 
-    # 去重降级说明，保持可读
-    deduped: list[str] = []
-    for note in notes:
-        if note not in deduped:
-            deduped.append(note)
-    return chunks, deduped[:20]
+    return chunks, _dedupe_notes(notes)[:20], _dedupe_notes(info)[:20]
+
+
+def _dedupe_notes(items: list[str]) -> list[str]:
+    """去重并保序，保持说明可读。"""
+    out: list[str] = []
+    for item in items:
+        if item not in out:
+            out.append(item)
+    return out
 
 
 def _is_high_risk(file_diff) -> bool:
