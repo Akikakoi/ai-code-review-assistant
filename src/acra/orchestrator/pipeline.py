@@ -513,6 +513,45 @@ def _open_repo(job: ReviewJob, settings, *, token: str | None = None):
     return gateway.discover_local(job.repo_path)
 
 
+#: 浅克隆历史不足时逐级加深的深度（§4.3 的按需 fetch：默认 depth=1 最省，
+#: 需要共同祖先时才加深，且设上限避免在大仓库上拉全量历史）
+DEEPEN_STEPS = (50, 200, 1000)
+
+
+def _merge_base_with_deepen(handle, base: str, head: str, info: list[str]) -> str:
+    """算 merge-base，浅克隆历史不足时**逐级加深再重试**。
+
+    实测：裸仓 + `fetch --depth=1` 全分支后，两个分支的 tip 之间没有共同祖先，
+    `git merge-base` 返回非零且无输出 —— 而 `_prepare_diff` 第一步就是它。
+    后果是**远端克隆路径（webhook 走的就是它）在真实 PR 上必然失败**，mode 记成 failed；
+    CLI 用本地仓库、历史完整，所以本地怎么测都不会发现。
+
+    加深成功记为**信息性**说明：它影响的是"这次为了拿到历史多花了多少网络"，
+    不是"分析范围被砍"。
+    """
+    try:
+        return handle.merge_base(base, head)
+    except GitError:
+        if not getattr(handle, "is_shallow", False):
+            raise
+
+    last_error: GitError | None = None
+    for depth in DEEPEN_STEPS:
+        if not handle.deepen(depth):
+            break
+        try:
+            result = handle.merge_base(base, head)
+        except GitError as exc:
+            last_error = exc
+            continue
+        info.append(f"浅克隆历史不足，已加深到 depth={depth} 后取得 merge-base")
+        return result
+
+    raise last_error or GitError(
+        f"浅克隆加深后仍无法计算 merge-base（{base} 与 {head}）"
+    )
+
+
 def _prepare_diff(handle, job: ReviewJob, settings, db, opts: ReviewOptions):
     """返回 (DiffSet, mode, 降级说明, 信息性说明)。"""
     notes: list[str] = []
@@ -520,7 +559,7 @@ def _prepare_diff(handle, job: ReviewJob, settings, db, opts: ReviewOptions):
     head = job.head_sha or handle.resolve_commit(job.head_ref or "HEAD")
     base_ref = job.base_ref or handle.default_branch()
     base = job.base_sha or handle.resolve_commit(base_ref)
-    merge_base = handle.merge_base(base, head)
+    merge_base = _merge_base_with_deepen(handle, base, head, info)
 
     start_sha = merge_base
     mode = "full"

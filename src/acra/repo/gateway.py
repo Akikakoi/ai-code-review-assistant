@@ -127,6 +127,26 @@ class RepoHandle:
         except GitError:
             return None
 
+    @property
+    def is_shallow(self) -> bool:
+        """浅克隆：历史被截断，任何需要共同祖先的操作（merge-base）都会失败。
+
+        **只有远端克隆路径会遇到** —— CLI 用本地仓库，历史完整，本地怎么测都不会发现。
+        """
+        return (self.root / "shallow").is_file()
+
+    def deepen(self, depth: int) -> bool:
+        """把浅克隆加深到指定深度。失败返回 False，由调用方决定是否继续加深/降级。"""
+        if not self.remote_url:
+            return False
+        args = ["fetch", "--no-tags", f"--depth={max(1, int(depth))}", "origin"]
+        args += ["+refs/heads/*:refs/remotes/origin/*"]
+        try:
+            self._run(args, timeout=600, error_cls=CloneError)
+        except CloneError:
+            return False
+        return True
+
     def merge_base(self, base: str, head: str) -> str:
         out = self._run(["merge-base", base, head], check=False).strip()
         if not out:
