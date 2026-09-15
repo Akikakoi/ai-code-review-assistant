@@ -500,6 +500,37 @@ def apply_threshold(
 # ---------------------------------------------------------------------------- 第 5 步
 
 
+#: 裸规则代码的形态（ruff `F401`、tsc `TS2322` 之类）
+_RULE_CODE_RE = re.compile(r"^[A-Z]{1,5}\d{2,5}$")
+
+
+def claims_static_rule(item: str, tool_names: frozenset[str]) -> bool:
+    """这条 evidence 是否在**声称引用某条静态规则**。
+
+    判定看**形态**，不看它有没有匹配上 —— 这正是原实现缺的那一步。
+
+    实测踩过：模型引用了一行真实存在、可定位的拼接 SQL 作为证据
+    （`sql = "select * from orders where id = '" + str(order_id) + "'"`），
+    却因为本次静态结果里没有对应规则被 `confidence *= 0.5`，
+    一条 `security / blocker / 0.9` 的结论掉到 0.45、被第 8 步门槛丢弃 ——
+    **一条真实的 SQL 注入因此没有到达作者**，而报告上只显示"0 条结论"。
+
+    取舍方向：**宁可少惩罚，也不要静默丢掉一条真结论**。
+    漏掉一次惩罚的代价是"多留了一条可能不可靠的结论"（作者看得见、能判断），
+    而错罚一次的代价是"一条真问题永久消失"（没人看得见）。
+    """
+    text = str(item).strip().strip("`").strip()
+    if not text:
+        return False
+    if _CODE_LIKE_RE.search(text):
+        # 已经是明显的代码片段，不可能是规则引用
+        return False
+    lowered = text.lower()
+    if any(lowered.startswith(f"{tool}:") for tool in tool_names):
+        return True
+    return bool(_RULE_CODE_RE.match(text))
+
+
 def cross_validate_findings(
     findings: list[RawFinding],
     static_findings: Iterable,
@@ -511,18 +542,27 @@ def cross_validate_findings(
     > 若 evidence 中引用了静态规则 ID，则校验该规则确实在本次输出中；否则视为编造证据
     > → confidence *= 0.5
 
+    惩罚的触发条件是"**声称**引用了静态规则"（见 `claims_static_rule`），
+    而不是"evidence 非空"。这条区别是实测补上的：把引用真实代码也算成编造证据，
+    会让正确的结论被降权到门槛以下、静默消失。
+
     只有真的开启了静态分析（`static_findings` 非空）时才会施加惩罚：
     阶段/仓库未启用静态检查时"没有规则可比对"，那是配置事实，不是模型编造证据。
     `evidence_rule_ids` 也是 §9.2 评分函数中"+0.15 有静态工具佐证"的依据。
     """
     available = available_rule_ids(static_findings)
+    tool_names = frozenset(str(t).lower() for t in available.values())
 
     for raw in findings:
         matched = match_evidence_rule_ids(raw, available)
         raw.raw["_evidence_rule_ids"] = matched
-        if penalize_unmatched and raw.evidence and not matched and available:
+        # 只惩罚"声称引用了静态规则、但本次没有这条规则"的结论。
+        # 引用真实代码作为证据不在此列 —— 原来那句 `raw.evidence and not matched`
+        # 会把"引用代码"一起打成"编造证据"，实测因此丢掉了真结论。
+        claimed = [e for e in raw.evidence if claims_static_rule(e, tool_names)]
+        if penalize_unmatched and claimed and not matched and available:
             raw.confidence = round(raw.confidence * 0.5, 4)
             raw.raw["_evidence_unverified"] = True
-            _note(raw, f"confidence*0.5(引用了 {len(raw.evidence)} 条证据但无一是本次静态结果)")
+            _note(raw, f"confidence*0.5(声称引用静态规则 {claimed} 但本次无此结果)")
     return findings
     return findings

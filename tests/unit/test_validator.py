@@ -455,3 +455,45 @@ def test_cross_validation_is_noop_when_no_static_findings() -> None:
     cross_validate_findings([raw], [])
     assert raw.confidence == 0.8
     assert raw.raw["_evidence_rule_ids"] == []
+
+
+def test_cross_validation_does_not_punish_real_code_evidence() -> None:
+    """回归：引用**真实代码**当证据，不能被当成"编造规则引用"。
+
+    实测丢过一条真结论：模型引用了一行真实、可定位的拼接 SQL，
+    本次静态结果里没有对应规则，于是 `confidence` 0.9 → 0.45，
+    被第 8 步门槛整条丢弃 —— 报告上只显示"0 条结论"，
+    没有任何地方提示"有一条被误判成了编造证据"。
+    """
+    code = "sql = \"select * from orders where id = '\" + str(order_id) + \"'\""
+    raw = _raw(category="security", severity="blocker", confidence=0.9, evidence=[code])
+    cross_validate_findings([raw], [_FakeStatic("F401", tool="ruff")])
+    assert raw.confidence == 0.9, "引用真实代码不该被降权"
+    assert raw.raw.get("_evidence_unverified") is None
+
+
+def test_cross_validation_still_punishes_rule_reference_claims() -> None:
+    """另一面：声称引用了静态规则、而本次没有这条规则 —— 仍然要惩罚。"""
+    raw = _raw(evidence=["ruff:F999"])
+    cross_validate_findings([raw], [_FakeStatic("F401", tool="ruff")])
+    assert raw.confidence == 0.4
+    assert raw.raw["_evidence_unverified"] is True
+
+
+@pytest.mark.parametrize(
+    ("evidence", "expected"),
+    [
+        ("ruff:F401", True),
+        ("semgrep:java.lang.security.audit.formatted-sql-string", True),
+        ("F401", True),
+        ("`F401`", True),
+        ('sql = "select * from t where id = " + x', False),
+        ("if (row == null) return;", False),
+        ("无来源的断言", False),
+    ],
+)
+def test_claims_static_rule_judges_by_shape(evidence: str, expected: bool) -> None:
+    """判定看**形态**，不看有没有匹配上 —— 这一步正是原实现缺的。"""
+    from acra.postprocess.validator import claims_static_rule
+
+    assert claims_static_rule(evidence, frozenset({"ruff", "semgrep"})) is expected
