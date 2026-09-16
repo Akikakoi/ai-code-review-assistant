@@ -65,6 +65,41 @@ L3 里的"相似实现"需要一个检索能力：找出仓库中同类功能的
 **仍未验证**：向量路径（需要 embedding 提供方），以及历史评论在真实跨 PR 场景下的效果
 （本地验证时结论库为空，走的是"查得到但为空"这条分支）。
 
+## 2026-09-16 补记三：向量路径已实现（本地 BGE / HTTP 后端），并修正一处设计偏离
+
+**一、嵌入文本改为确定性拼接，偏离了本 ADR 的"自然语言摘要"。**
+
+v1 嵌入的是 **签名 + 方法源码**（截断到 1200 字符）的确定性文本，不是 LLM 预生成的摘要：
+
+1. 摘要要按方法数计费，而索引要覆盖全仓库 —— 成本在验证阈值合理性**之前**就发生，顺序反了；
+2. 确定性文本可重建、可增量（源码 content-hash 没变就不重嵌），摘要做不到；
+3. bge/text-embedding-v2 都是通用文本模型，对代码的语义区分本来就有限 ——
+   先验证 0.75 阈值在确定性文本上是否成立，再决定要不要上摘要。
+
+摘要版本保留为升级路径。若后续引入，注意它会让增量缓存失效（摘要随模型/版本变化）。
+
+**二、实现要点**（`src/acra/context/vector.py`）：
+
+- 嵌入后端可插拔：本地 BGE（sentence-transformers，可选依赖）／HTTP 服务
+  （stellar-mall rag-backend 的 `POST /embed` 形状）／OpenAI 兼容 `/embeddings`（DashScope 等）；
+  按 `acra_l3_embedding_endpoint` 是否配置自动选择，**都不可用时如实说明并退回符号匹配**
+- 索引落 SQLite（`<workdir>/l3-index/<repo>.sqlite`），按 (path, start_line) 主键 +
+  文本 content-hash 增量；**不用 ChromaDB** —— acra 的规模是"一个仓库的方法数"，
+  归一化余弦用 numpy 暴力扫描是毫秒级，引入向量数据库在这个量级换不来收益
+- 默认关闭（`ACRA_L3_VECTOR_ENABLED=false`）：它需要 ~300MB 依赖 + 1.3GB 模型，
+  不是"代码有了就该默认开"的东西；未启用时 L3 走符号匹配并如实说明
+- BGE 向量入库前归一化，余弦退化为点积
+
+**三、本机安装路径**（China 网络，实测）：
+
+- torch 必须走 **CPU 专用源**：`download.pytorch.org/whl/cpu` 在本机长期停滞，
+  换 `https://mirrors.aliyun.com/pytorch-wheels/cpu/`（find-links）可用
+- sentence-transformers 走清华 PyPI 镜像
+- 模型：`HF_ENDPOINT=https://hf-mirror.com` 下载 `BAAI/bge-large-zh-v1.5`（~1.3GB）
+- 本地已有 `D:\Desktop\stellar-mall\rag-backend\data\models\bge-reranker-v2-m3`
+  （2.2GB）—— 但那是 **reranker 不是 embedding**，两者不能互相替代：
+  reranker 是交叉编码器，只能给"已有候选"打分，做不了全仓库召回
+
 ## 2026-09-16 补记二：历史评论这条线索接通了，但实测**没有抑制效果**
 
 历史评论的三段链路已全部接通并实测可见（`prior_comments_by_path` 按**结果标签**

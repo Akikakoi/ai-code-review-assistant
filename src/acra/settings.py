@@ -104,6 +104,19 @@ class Settings(BaseSettings):
     acra_l3_max_callers: int = 8
     #: 注入提示词的相似实现上限（ADR 0006 的 top-3）
     acra_l3_max_similar: int = 3
+    #: 是否启用向量检索（ADR 0006 的小仓库策略）。默认关闭：它需要
+    ## sentence-transformers + torch（约 300MB 依赖）与一次 1.3GB 的模型下载，
+    ## 不是"装上就该默认开"的东西。未启用/不可用时 L3 退化为符号匹配并如实说明。
+    acra_l3_vector_enabled: bool = False
+    #: 嵌入模型（本地 BGE；与 ADR 0006 的维度口径一致）
+    acra_l3_embedding_model: str = "BAAI/bge-large-zh-v1.5"
+    #: 本地模型目录（已下载过时可指向它，避免走 HF）
+    acra_l3_embedding_local_path: str = ""
+    #: 外部嵌入服务（如 stellar-mall rag-backend 的 `POST /embed`）。
+    #: 配置了就走 HTTP，否则用上面的本地 BGE。
+    acra_l3_embedding_endpoint: str = ""
+    #: 向量索引覆盖的文件数上限（首次建索引的成本正比于此）
+    acra_l3_max_index_files: int = 2000
 
     #: 静态分析总开关。默认开启；工具没装或没配置规则集时逐项跳过并写进降级说明，
     #: 不会因为环境缺工具而让整条链路失败。

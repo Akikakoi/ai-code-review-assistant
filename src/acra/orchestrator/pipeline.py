@@ -664,8 +664,27 @@ def _build_chunks(
         symbol_index=symbol_index,
         repo_files=repo_files,
     )
+    vector_index = None
+    if settings.acra_l3_vector_enabled and repo_files:
+        from acra.context.vector import MethodVectorIndex, pick_backend
+
+        backend, why = pick_backend(settings)
+        if backend is None:
+            info.append(f"L3 向量后端不可用：{why}")
+        else:
+            import hashlib
+
+            repo_key = hashlib.sha256(
+                str(getattr(handle, "root", "") or "").encode("utf-8")
+            ).hexdigest()[:16]
+            vector_index = MethodVectorIndex(
+                settings.ensure_workdir() / "l3-index" / f"{repo_key}.sqlite", backend
+            )
     retriever = (
-        Retriever(handle, settings, head_sha=diff_set.head_sha, repo_files=repo_files)
+        Retriever(
+            handle, settings, head_sha=diff_set.head_sha,
+            repo_files=repo_files, vector_index=vector_index,
+        )
         if repo_files
         else None
     )

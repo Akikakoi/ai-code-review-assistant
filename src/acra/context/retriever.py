@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from acra.context.vector import MethodVectorIndex
 from acra.models import CallSite, CodeSlice, FileDiff, SymbolSpan
 from acra.repo.symbol_index import find_enclosing_spans, language_for_path
 
@@ -144,13 +145,16 @@ class Retriever:
         *,
         head_sha: str = "",
         repo_files: list[str] | None = None,
+        vector_index: MethodVectorIndex | None = None,
     ) -> None:
         self.handle = handle
         self.settings = settings
         self.head_sha = head_sha
         self.repo_files = list(repo_files or [])
+        self.vector_index = vector_index
         self._source_cache: dict[str, list[str]] = {}
         self._candidates_truncated = False
+        self._vector_state: tuple[bool, str] | None = None
 
     # ---------------------------------------------------------------- 策略
 
@@ -165,10 +169,20 @@ class Retriever:
             return STRATEGY_VECTOR
         return STRATEGY_SYMBOL
 
+    def _vector_usable(self) -> bool:
+        """向量路径是否真的可用（配置开启 + 后端就绪）。结果按实例缓存。"""
+        if self._vector_state is None:
+            if self.vector_index is None:
+                self._vector_state = (False, "未启用（ACRA_L3_VECTOR_ENABLED=false）")
+            else:
+                ok, why = self.vector_index.backend.available()
+                self._vector_state = (ok, why)
+        return self._vector_state[0]
+
     @property
     def effective_strategy(self) -> str:
-        """实际能用的策略。向量路径未实现，因此恒为符号匹配。"""
-        return STRATEGY_SYMBOL
+        """实际能用的策略。向量不可用时退化为符号匹配。"""
+        return STRATEGY_VECTOR if self._vector_usable() else STRATEGY_SYMBOL
 
     @property
     def max_scan_files(self) -> int:
@@ -224,10 +238,11 @@ class Retriever:
             clues.notes.append("L3 未启用（缺少仓库句柄、repo 文件清单或 head_sha）")
             return clues
 
-        if self.strategy == STRATEGY_VECTOR and self.effective_strategy == STRATEGY_SYMBOL:
+        if not self._vector_usable():
+            _, why = self._vector_state or (False, "")
             clues.notes.append(
-                "L3 向量检索未实现（需要 embedding 提供方与方法摘要索引），已退化为符号名匹配"
-                f"（仓库 {len(self.repo_files)} 个文件，低于 {VECTOR_SEARCH_MAX_FILES} 的阈值本应走向量）"
+                f"L3 向量检索不可用（{why}），已退化为符号名匹配"
+                f"（仓库 {len(self.repo_files)} 个文件）"
             )
 
         names = self._symbol_names(spans)
@@ -238,7 +253,16 @@ class Retriever:
         try:
             candidates = self._candidates(file_diff.path)
             callers = self._callers(names, file_diff.path, candidates)
-            similar = self._similar(file_diff.path, names, candidates)
+            if self._vector_usable():
+                similar, vector_notes = self._similar_via_vector(file_diff, spans)
+                clues.notes.extend(vector_notes)
+                if not similar:
+                    # 向量无命中时退回符号匹配：有线索总比没有强，
+                    # 退回这件事本身也写进说明，不静默。
+                    clues.notes.append("L3 向量无命中，已退回符号名匹配")
+                    similar = self._similar(file_diff.path, names, candidates)
+            else:
+                similar = self._similar(file_diff.path, names, candidates)
         except Exception as exc:  # noqa: BLE001 - 线索是增强项，失败不该影响主链路
             clues.notes.append(f"L3 检索失败（{type(exc).__name__}），本次无 L3 线索")
             return clues
@@ -257,6 +281,25 @@ class Retriever:
                 f"L3 已执行但未找到调用方或相似实现（扫描 {len(candidates)} 个候选文件）"
             )
         return clues
+
+    def _similar_via_vector(
+        self, file_diff: FileDiff, spans: list[SymbolSpan]
+    ) -> tuple[list[CodeSlice], list[str]]:
+        """向量策略的相似实现：增量建索引 → 以变更方法文本为 query。"""
+        notes: list[str] = []
+        embedded, build_notes = self.vector_index.build(
+            self.repo_files,
+            self._lines,
+            max_files=max(1, int(getattr(self.settings, "acra_l3_max_index_files", 2000))),
+        )
+        notes.extend(build_notes)
+        if embedded:
+            notes.append(f"向量索引：本次嵌入 {embedded} 个方法（增量，hash 未变不重嵌）")
+        else:
+            notes.append("向量索引：本次无新增方法需要嵌入（全部命中缓存）")
+        similar = self.vector_index.query(file_diff, spans, top_k=self.max_similar)
+        notes.append(f"向量检索策略={self.vector_index.backend.name}")
+        return similar, notes
 
     @staticmethod
     def _symbol_names(spans: list[SymbolSpan]) -> list[str]:

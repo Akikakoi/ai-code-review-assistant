@@ -165,10 +165,13 @@ def test_strategy_follows_repo_size_but_effective_is_symbol() -> None:
     assert large.effective_strategy == STRATEGY_SYMBOL
 
 
-def test_vector_strategy_is_reported_as_not_implemented() -> None:
-    files = {"app/service.py": SERVICE, "app/handler.py": HANDLER}
+def test_vector_strategy_reports_why_it_fell_back() -> None:
+    """向量未启用时必须说明原因并退回符号匹配，而不是静默给空结果。"""
+    files = {"app/service.py": SERVICE, "app/query.py": QUERY, "app/handler.py": HANDLER}
     clues = _retriever(files).clues(_fd("app/service.py"), [_span("find_order")])
-    assert any("向量检索未实现" in n for n in clues.notes)
+    assert any("向量检索不可用" in n for n in clues.notes), clues.notes
+    # 退化不等于没干活：符号匹配的线索仍然要给出来
+    assert clues.similar, "退化到符号匹配后应有相似实现"
 
 
 def test_disabled_retriever_explains_why() -> None:
@@ -256,3 +259,110 @@ def test_search_failure_degrades_instead_of_raising() -> None:
     clues = retriever.clues(_fd("app/service.py"), [_span("find_order")])
     assert clues.callers == []
     assert any("检索失败" in n for n in clues.notes)
+
+
+# ---------------------------------------------------------------------------- 向量路径
+
+
+class BagOfWordsBackend:
+    """确定性嵌入：token 落进固定维度桶再归一化。
+
+    同词集 → 同向量（相似度 1.0），词集重叠多 → 相似度高。
+    既可重复又有意义，让向量检索的测试不依赖真实模型。
+    """
+
+    name = "fake_bag"
+
+    def __init__(self, dims: int = 64) -> None:
+        self.dims = dims
+
+    def available(self):
+        return True, ""
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        import hashlib
+        import re
+
+        out = []
+        for text in texts:
+            vec = [0.0] * self.dims
+            for token in re.findall(r"[a-z_]+", text.lower()):
+                idx = int(hashlib.md5(token.encode()).hexdigest(), 16) % self.dims
+                vec[idx] += 1.0
+            norm = sum(x * x for x in vec) ** 0.5 or 1.0
+            out.append([x / norm for x in vec])
+        return out
+
+
+def _vector_retriever(files: dict[str, str], tmp_path, **kwargs):
+    from acra.context.vector import MethodVectorIndex
+
+    backend = BagOfWordsBackend()
+    index = MethodVectorIndex(tmp_path / "l3-index" / "test.sqlite", backend)
+    retriever = Retriever(
+        FakeHandle(files), _settings(**kwargs), head_sha="head",
+        repo_files=list(files), vector_index=index,
+    )
+    return retriever, index
+
+
+def test_vector_index_finds_similar_method_from_other_file(tmp_path) -> None:
+    files = {
+        "app/service.py": SERVICE,
+        "app/query.py": QUERY,
+        "app/handler.py": HANDLER,
+    }
+    retriever, index = _vector_retriever(files, tmp_path)
+    clues = retriever.clues(_fd("app/service.py"), [_span("find_order")])
+
+    paths = {s.path for s in clues.similar}
+    assert "app/query.py" in paths, f"同名实现应被向量检索命中，实际 {paths}"
+    assert "app/service.py" not in paths, "必须过滤掉自己（ADR 0006）"
+    assert any("向量检索策略=fake_bag" in n for n in clues.notes), clues.notes
+
+
+def test_vector_index_incremental_build_skips_unchanged(tmp_path) -> None:
+    """content-hash 未变不重嵌 —— 这是增量索引成立的前提。"""
+    files = {"app/service.py": SERVICE, "app/query.py": QUERY}
+    retriever, index = _vector_retriever(files, tmp_path)
+    retriever.clues(_fd("app/service.py"), [_span("find_order")])
+    first = index.embedded_count
+    assert first > 0
+
+    clues = retriever.clues(_fd("app/service.py"), [_span("find_order")])
+    assert index.embedded_count == first, "第二次构建不应重复嵌入"
+    assert any("无新增方法需要嵌入" in n for n in clues.notes), clues.notes
+    assert clues.similar, "缓存命中后查询仍应有结果"
+
+
+def test_vector_backend_unavailable_falls_back_to_symbol(tmp_path) -> None:
+    """后端不可用时退回符号匹配，且说明里写明原因。"""
+    from acra.context.vector import MethodVectorIndex
+
+    class DeadBackend:
+        name = "dead"
+
+        def available(self):
+            return False, "依赖未安装"
+
+        def embed(self, texts):
+            raise RuntimeError("不该被调用")
+
+    files = {"app/service.py": SERVICE, "app/query.py": QUERY}
+    index = MethodVectorIndex(tmp_path / "l3-index" / "dead.sqlite", DeadBackend())
+    retriever = Retriever(
+        FakeHandle(files), _settings(), head_sha="head",
+        repo_files=list(files), vector_index=index,
+    )
+    clues = retriever.clues(_fd("app/service.py"), [_span("find_order")])
+    assert any("依赖未安装" in n for n in clues.notes), clues.notes
+    assert clues.similar, "退回符号匹配后应有线索"
+
+
+def test_method_text_is_deterministic() -> None:
+    """同一段源码必须产出同样的嵌入文本 —— 否则增量缓存永远失效。"""
+    from acra.context.vector import method_text, text_hash
+
+    span = _span("find_order")
+    assert method_text(span) == method_text(span)
+    assert text_hash(method_text(span)) == text_hash(method_text(span))
