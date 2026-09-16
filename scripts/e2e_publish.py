@@ -19,6 +19,9 @@
 前置：
   - 发布凭据（`ACRA_GITHUB_TOKEN`，或 App 的三项配置）
   - 分支已推送到远端，且包含至少一处可被审出的变更
+  - 分支**在本地也存在同名 ref**：`--head <branch>` 是本地解析的，
+    只有远端分支会直接 GitError —— 而 `run_review` 曾因此读到陈旧输出文件
+    还当成"本次成功"（CLI 失败不写新文件，旧文件还在）。现已加 rc 检查与预清理。
 
 用法：
     python scripts/e2e_publish.py --branch e2e-publish-probe
@@ -120,10 +123,17 @@ def run_review(*, owner: str, repo: str, base: str, branch: str, pr: int, out: P
         "--publish", "--format", "json", "--out", str(out),
     ]
     print("  → " + " ".join(cmd[4:]), flush=True)
+    # 先清掉上一次的输出：CLI 失败时不会写文件，残留的旧结果会被当成"本次成功"读回来，
+    # 报告里就会出现别的 PR 的 review_id —— 实测踩过（读到了 PAT 时代的陈旧 JSON）。
+    out.unlink(missing_ok=True)
     proc = subprocess.run(
         cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
         env={**os.environ},
     )
+    if proc.returncode != 0:
+        raise SystemExit(
+            f"审查失败（rc={proc.returncode}）：\n{proc.stdout[-1500:]}\n{proc.stderr[-1500:]}"
+        )
     if not out.exists():
         raise SystemExit(
             f"审查未产出结果（rc={proc.returncode}）：\n{proc.stdout[-1500:]}\n{proc.stderr[-1500:]}"

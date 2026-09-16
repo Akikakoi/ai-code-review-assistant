@@ -96,3 +96,23 @@ sql = "select * from orders where id = '" + str(order_id) + "'"
   PAT 形态已端到端验证通过；App 形态的差异主要在 token 获取与 Check Run 能力，
   而 Check Run 正是 App 才能建的那个 —— 所以"App 形态能建 Check Run"这件事
   目前仍是文档结论，不是实测结论。
+
+## 2026-09-16 补记：App 形态已验证，"只有 App 能建 Check Run"得到实测确认
+
+用户提供 App 凭据后，同一脚本（`scripts/e2e_publish.py`）以 App 形态完整通过 7/7：
+
+- JWT 签发 → installation token 换取与缓存刷新 ✓
+- review 以 **`<app-slug>[bot]`** 身份发到真实 PR ✓
+- **Check Run 由 App 创建成功**（`app: code-review-assistant-by-akikakoi`）——
+  补记一里"细粒度 PAT 是 403"的另一半答案就此闭环：**Check Run 只能由 App 建**
+  从文档结论变成了实测结论
+- 幂等、平台侧回读断言全部通过
+
+过程中还暴露了**验证脚本自身的两个缺陷**（比 App 形态本身更值得记）：
+
+1. `--head <branch>` 是**本地解析**的。探针分支只推到了远端、本地没有同名 ref，
+   CLI 直接 GitError —— 而 `run_review` 不检查返回码、也不清理上一次的输出文件，
+   于是把 **PAT 时代的陈旧 JSON** 当成"本次成功"读了回来，报告里出现了
+   别的 PR 的 review_id 和 PAT 的 403。已修：预清理输出文件 + 检查 rc + 失败时打印 stderr。
+2. 顺带确认：`resolve_access` 里 `ACRA_GITHUB_TOKEN` **优先于** App 凭据，
+   切换形态时必须显式注释掉 PAT，否则 App 路径永远不会被走到。
