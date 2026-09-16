@@ -38,6 +38,12 @@ dev = [
     "ruff>=0.8",
 ]
 postgres = ["psycopg[binary]>=3.2"]
+# L3 向量检索的可选依赖（ADR 0006 小仓库策略）。
+# torch 请走 CPU 专用源安装：pip install torch -f https://mirrors.aliyun.com/pytorch-wheels/cpu/
+l3-vector = [
+    "torch>=2.0",
+    "sentence-transformers>=3.0",
+]
 redis = ["redis>=5.2"]
 
 [project.scripts]
