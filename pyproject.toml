@@ -16,7 +16,9 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "httpx>=0.27",
-    "pyjwt>=2.8",
+    # [crypto] 是 RS256 签名的硬依赖（App JWT）：裸 pyjwt 装不出 cryptography，
+    # 干净环境（CI/部署）里 App 发布路径会直接挂——实测踩过。
+    "pyjwt[crypto]>=2.8",
     "typer>=0.13",
     "sqlalchemy>=2.0",
     "jsonschema>=4.23",
