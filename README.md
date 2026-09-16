@@ -592,6 +592,22 @@ MiMo 的思考 token 计入 `max_completion_tokens`。预算给小了会出现
 之所以要专门检视：`callers=[]` 与 `similar_impls=[]` 都是**合法返回值**，
 和"确实没有调用方"长得一模一样 —— 只看返回值无法区分"这一层没建成"与"这次确实没有"。
 
+L3 的相似实现有两条策略（ADR 0006）：**符号匹配**（默认，零依赖）与
+**向量检索**（语义相近但名字不同的实现也能找到）。向量默认关闭 ——
+它需要 ~300MB 依赖（torch CPU + sentence-transformers）与一次 1.3GB 的模型下载：
+
+```bash
+./.venv/Scripts/python.exe -m pip install torch -f https://mirrors.aliyun.com/pytorch-wheels/cpu/
+./.venv/Scripts/python.exe -m pip install sentence-transformers -i https://pypi.tuna.tsinghua.edu.cn/simple
+HF_ENDPOINT=https://hf-mirror.com ./.venv/Scripts/python.exe -c \
+  "from huggingface_hub import snapshot_download; print(snapshot_download('BAAI/bge-large-zh-v1.5'))"
+# .env 追加：ACRA_L3_VECTOR_ENABLED=true
+```
+
+不想装依赖的话，配 `ACRA_L3_EMBEDDING_ENDPOINT=http://<嵌入服务>` 走外部服务
+（兼容 stellar-mall rag-backend 的 `POST /embed`）也可。两条路都不可用时，
+L3 会退回符号匹配并在说明里写明原因 —— 不静默。
+
 还有两条**不在 CI 里跑**的验证 —— 都会写真实平台、需要凭据：
 
 ```bash
