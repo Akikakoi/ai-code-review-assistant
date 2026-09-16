@@ -310,11 +310,18 @@ class ContextBuilder:
         if not allow_l3:
             priors = []
         else:
+            if priors:
+                # 注入必须可见：否则"带历史跑了"与"没带历史"在报告上无法区分，
+                # "避免重复提出"有没有效果也就无从量测。
+                l3_notes.append(f"L3 历史评论 {len(priors)} 条已注入（避免重复提出）")
             if retriever is not None:
                 clues = retriever.clues(file_diff, spans)
                 callers = clues.callers
                 similar = clues.similar
-                l3_notes = list(clues.notes)
+                # 必须 extend 而不是覆盖：上面的历史评论说明已经写进来了，
+                # 这里重新赋值会把它吃掉 —— 实测就这么丢过一次，
+                # 结果是"历史评论到底注没注入"在报告上无法判断。
+                l3_notes.extend(clues.notes)
                 if clues.truncated:
                     # 线索可能不完整 —— 这条是**降级**（与 notes 不同）
                     degraded.append(

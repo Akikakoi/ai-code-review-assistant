@@ -301,26 +301,47 @@ def prior_comments_by_path(
     用途是让模型"不要重复提出"已经提过的问题 —— 但那要靠上下文拿到历史结论才行，
     在此之前这条线索从未被注入过（函数不存在，pipeline 也不知道该从哪取）。
     这里只取**本仓库**的结论：同一个路径在别的仓库里指的不是同一份代码。
+
+    **每条都带结果标签（已发布 / 已驳回（误报）/ 未发布）。** 只给裸的"标题：正文"
+    会让两种相反的情况得到同样的对待：模型没有依据判断哪些是团队认可的、
+    哪些是已经被驳回的 —— 后者被原样喂回去，等于鼓励它复活已经被拒绝的结论。
     """
     wanted = [p for p in dict.fromkeys(paths) if p]
     if not wanted:
         return {}
 
     stmt = (
-        select(FindingRow.path, FindingRow.line, FindingRow.title, FindingRow.body)
+        select(
+            FindingRow.path,
+            FindingRow.line,
+            FindingRow.title,
+            FindingRow.body,
+            FindingRow.published,
+            FindingRow.is_false_positive,
+        )
         .join(ReviewRun, ReviewRun.id == FindingRow.review_run_id)
         .where(ReviewRun.repository_id == repository_id, FindingRow.path.in_(wanted))
         .order_by(FindingRow.created_at.desc(), FindingRow.id.desc())
     )
     out: dict[str, list[PriorComment]] = {}
-    for path, line, title, body in session.execute(stmt).all():
+    for path, line, title, body, published, is_false_positive in session.execute(stmt).all():
         bucket = out.setdefault(path, [])
         if len(bucket) >= limit_per_path:
             continue
         bucket.append(
-            PriorComment(path=path, line=int(line), body=f"{title}：{body}"[:400])
+            PriorComment(
+                path=path,
+                line=int(line),
+                body=f"[{_outcome_label(published, is_false_positive)}] {title}：{body}"[:400],
+            )
         )
     return out
+
+
+def _outcome_label(published: bool, is_false_positive: bool | None) -> str:
+    if is_false_positive:
+        return "已驳回（误报）"
+    return "已发布" if published else "未发布"
 
 
 def daily_cost_micros(session: Session) -> int:

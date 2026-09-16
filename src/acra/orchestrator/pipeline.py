@@ -314,7 +314,7 @@ async def run_review(
         outcome.degrade.add("静态检查超时：" + "、".join(static_report.timed_out))
 
     # ---- 5. 上下文与分块 ----
-    priors_by_path = _load_prior_comments(db, job, diff_set, opts, settings)
+    priors_by_path = _load_prior_comments(db, job, diff_set, settings)
     chunks, context_notes, context_info = await asyncio.to_thread(
         _build_chunks,
         handle,
@@ -597,14 +597,18 @@ def _prepare_diff(handle, job: ReviewJob, settings, db, opts: ReviewOptions):
 
 
 def _load_prior_comments(
-    db, job: ReviewJob, diff_set: DiffSet, opts: ReviewOptions, settings
+    db, job: ReviewJob, diff_set: DiffSet, settings
 ) -> dict[str, list[PriorComment]]:
     """该仓库对这些文件的历史审查结论（§7.1「历史评论，用于避免重复提」）。
 
-    只在可能用到 L3 时才查：L3 默认关闭，默认路径上不该多一次查询。
+    这里**刻意不按配置的层级上限设门**：L3 触发是逐文件的（§7.2），在 build() 里
+    才会把命中的文件升到 3，而这一步发生在查询之后 —— 按 `max_level >= 3` 设门
+    会让默认配置（上限 2）下的历史评论**永远加载不到**，哪怕文件确实触发了 L3。
+    实测踩过：这正是"接口在、结果恒为空"的又一形态，量测时才发现。
+
+    代价只是每次运行多一条 SELECT；是否注入仍由 build() 的 `allow_l3` 决定。
     """
-    max_level = opts.level or min(settings.acra_context_level_max, 3)
-    if db is None or max_level < 3:
+    if db is None:
         return {}
     try:
         from acra.store.repository import prior_comments_by_path

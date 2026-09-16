@@ -107,6 +107,10 @@ class Api:
     def close_pr(self, owner: str, repo: str, pr: int) -> int:
         return self.client.patch(f"/repos/{owner}/{repo}/pulls/{pr}", json={"state": "closed"}).status_code
 
+    def check_run(self, owner: str, repo: str, run_id: int) -> dict:
+        resp = self.client.get(f"/repos/{owner}/{repo}/check-runs/{run_id}")
+        return resp.json() if resp.status_code < 400 else {}
+
 
 def run_review(*, owner: str, repo: str, base: str, branch: str, pr: int, out: Path) -> dict:
     cmd = [
@@ -195,10 +199,24 @@ def main() -> int:
                 len(comments) == (published.get("comments") or 0),
                 f"平台={len(comments)} 本地={published.get('comments')}",
             )
-            if published.get("check_run_id"):
-                print(f"   Check Run id = {published['check_run_id']}")
+            if access.source == "app":
+                # App 形态下 Check Run **应该**建得出来 —— 这正是"只有 App 才能回答"的问题
+                # （实测细粒度 PAT 是 403）。所以这里失败要算 FAIL，不能只当警告。
+                if published.get("check_run_id"):
+                    cr = api.check_run(owner, repo, int(published["check_run_id"]))
+                    check(
+                        "App 形态建出了 Check Run（只有 App 能做到）",
+                        bool(cr) and str(cr.get("head_sha") or "").startswith(head_sha[:8]),
+                        f"id={cr.get('id')} head={str(cr.get('head_sha'))[:8]}",
+                    )
+                else:
+                    check(
+                        "App 形态建出了 Check Run（只有 App 能做到）",
+                        False,
+                        str(published.get("check_run_error"))[:200],
+                    )
             elif published.get("check_run_error"):
-                print(f"   ⚠ Check Run 失败：{published['check_run_error']}（评论不受影响，代码已容错）")
+                print(f"   ℹ Check Run 失败属预期（PAT 建不了）：{published['check_run_error'][:90]}")
 
             print("4. 幂等：同一 head_sha 再跑一次")
             second = run_review(

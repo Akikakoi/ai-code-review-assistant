@@ -18,7 +18,9 @@ from acra.store.repository import (
     last_merge_base,
     last_reviewed_sha,
     load_repo_config,
+    mark_published,
     metrics_summary,
+    prior_comments_by_path,
     save_findings,
     save_repo_config,
     set_feedback,
@@ -295,5 +297,74 @@ def test_only_succeeded_run_becomes_baseline_even_if_newer_runs_failed(tmp_path)
             # 关键：head 与 merge_base 必须来自**同一次**运行，不能 H1 配 MB2
             assert last_reviewed_sha(session, repo_id, 5) == "H1"
             assert last_merge_base(session, repo_id, 5) == "MB1"
+    finally:
+        db.dispose()
+
+
+def test_prior_comments_carry_outcome_labels(tmp_path) -> None:
+    """历史评论必须带结果标签，否则两种相反的情况会被同样对待。
+
+    团队驳回过的结论如果被裸着喂回去，等于鼓励模型复活已经被拒绝的意见 ——
+    而"不要重复提出"这条提示只有在模型能区分"采纳过/驳回过"时才可判断。
+    """
+    db = _db(tmp_path)
+    try:
+        with db.session() as session:
+            repo = get_or_create_repository(session, full_name="o/r")
+            run = start_run(
+                session,
+                job_id="job-priors",
+                repository_id=repo.id,
+                pr_number=7,
+                base_sha="b",
+                head_sha="h",
+                merge_base_sha="mb",
+                trigger_source="cli",
+                mode="full",
+            )
+            rows = save_findings(
+                session,
+                run.id,
+                [
+                    Finding(path="src/A.java", line=1, category="bug", severity="high",
+                            confidence=0.9, score=1.0, title="已发布的", body="b1"),
+                    Finding(path="src/A.java", line=2, category="bug", severity="high",
+                            confidence=0.9, score=1.0, title="被驳回的", body="b2"),
+                    Finding(path="src/B.java", line=3, category="style", severity="low",
+                            confidence=0.6, score=0.5, title="没发布的", body="b3"),
+                ],
+            )
+            mark_published(session, [rows[0].id])
+            set_feedback(session, rows[1].id, is_false_positive=True)
+
+        with db.session() as session:
+            result = prior_comments_by_path(session, repo.id, ["src/A.java", "src/B.java"])
+            bodies_a = [c.body for c in result["src/A.java"]]
+            assert any(b.startswith("[已发布]") for b in bodies_a), bodies_a
+            assert any(b.startswith("[已驳回（误报）]") for b in bodies_a), bodies_a
+            assert all(b.startswith("[未发布]") for b in (c.body for c in result["src/B.java"]))
+    finally:
+        db.dispose()
+
+
+def test_prior_comments_do_not_leak_across_repositories(tmp_path) -> None:
+    """同一个路径在别的仓库里指的不是同一份代码，历史不能串。"""
+    db = _db(tmp_path)
+    try:
+        with db.session() as session:
+            repo_a = get_or_create_repository(session, full_name="o/a")
+            repo_b = get_or_create_repository(session, full_name="o/b")
+            for rid, job in ((repo_a.id, "job-a"), (repo_b.id, "job-b")):
+                run = start_run(session, job_id=job, repository_id=rid, pr_number=1,
+                                base_sha="b", head_sha="h", merge_base_sha="mb",
+                                trigger_source="cli", mode="full")
+                save_findings(session, run.id, [
+                    Finding(path="app/service.py", line=5, category="bug", severity="high",
+                            confidence=0.9, score=1.0, title=f"来自 {job}", body="x"),
+                ])
+
+        with db.session() as session:
+            only_a = prior_comments_by_path(session, repo_a.id, ["app/service.py"])
+            assert [c.body for c in only_a["app/service.py"]] == ["[未发布] 来自 job-a：x"]
     finally:
         db.dispose()
