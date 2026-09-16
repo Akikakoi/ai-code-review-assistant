@@ -76,7 +76,7 @@ jobs:
           if-no-files-found: warn
 
   offline-eval:
-    name: info · 纯静态评估基线
+    name: info · 静态探针基线
     needs: checks
     continue-on-error: true
     runs-on: ubuntu-latest
@@ -90,10 +90,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-      # 目标未达标时本命令会返回 1，因此这个任务刻意设为 continue-on-error：
-      # 基线是给人看的趋势，不是阻断条件（真正的质量门禁是真实模型跑分 + 人工判定）。
-      - name: 全量纯静态基线（80+ 用例，离线）
-        run: python -m acra.cli eval run --no-llm --out .acra-work/eval/baseline.json
+          # 静态探针依赖 semgrep（外部工具，不在 dev 组里：只有本任务用得到）
+          python -m pip install semgrep
+      # --no-llm 模式只能测静态层；全量 101 用例里 81 个是语义缺陷（LLM 的活），
+      # 在 CI 上 recall 恒为 0、结构性不达标 —— 所以这里只跑静态探针子集。
+      - name: 生成静态探针数据集
+        run: python -c "from acra.eval.dataset import save_jsonl; from acra.eval.static_cases import static_cases; save_jsonl(static_cases(), '.acra-work/eval/static-cases.jsonl')"
+      - name: 静态探针基线（离线）
+        run: python -m acra.cli eval run --dataset .acra-work/eval/static-cases.jsonl --no-llm --out .acra-work/eval/baseline.json
       - name: 上传基线报告
         if: always()
         uses: actions/upload-artifact@v4
