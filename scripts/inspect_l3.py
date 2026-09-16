@@ -45,7 +45,26 @@ def main() -> int:
     )
     repo_files = handle.list_files(head_sha)
 
-    retriever = Retriever(handle, settings, head_sha=head_sha, repo_files=repo_files)
+    # 向量路径：配置开启时按与 pipeline 相同的规则构建索引
+    vector_index = None
+    if settings.acra_l3_vector_enabled and repo_files:
+        import hashlib
+
+        from acra.context.vector import MethodVectorIndex, pick_backend
+
+        backend, why = pick_backend(settings)
+        if backend is None:
+            print(f"⚠ 向量后端不可用：{why}")
+        else:
+            key = hashlib.sha256(str(handle.root).encode("utf-8")).hexdigest()[:16]
+            vector_index = MethodVectorIndex(
+                settings.ensure_workdir() / "l3-index" / f"{key}.sqlite", backend
+            )
+            print(f"向量后端：{backend.name}")
+
+    retriever = Retriever(
+        handle, settings, head_sha=head_sha, repo_files=repo_files, vector_index=vector_index
+    )
     builder = ContextBuilder(
         handle, settings, head_sha=head_sha, symbol_index=SymbolIndex(), repo_files=repo_files
     )
